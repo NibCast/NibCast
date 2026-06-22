@@ -1,0 +1,1809 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NIBCAST</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<!-- Fonts are self-hosted (static/fonts/) so the dashboard makes no request to
+     Google — keeps NibCast fully local and avoids leaking the user's IP. -->
+<link rel="stylesheet" href="{{ url_for('static', filename='fonts/fonts_f5d4790d.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v=9">
+</head>
+<body data-theme="foundry" data-effects="false">
+<div id="root">
+
+<!-- ─── SETUP BANNER (hidden until API key check runs) ──── -->
+<div id="setup-banner" style="display:none;background:#2a1a00;border-bottom:1px solid #e8a52560;padding:10px 20px;font-family:'DM Mono',monospace;font-size:12px;color:#e8a525;align-items:center;gap:12px;">
+  <span>⚠</span>
+  <span id="setup-banner-msg">API key not configured — voice dictation won't work.</span>
+  <a id="setup-banner-link" href="https://console.groq.com" target="_blank" style="color:#e8a525;text-decoration:underline;">Get free key →</a>
+  <a href="#" style="color:#e8a525;text-decoration:underline;margin-left:8px;" onclick="switchPanel('config');document.getElementById('setup-banner').style.display='none';return false;">Open Config →</a>
+  <button onclick="document.getElementById('setup-banner').style.display='none'" style="margin-left:auto;background:none;border:none;color:#e8a525;cursor:pointer;font-size:14px;">✕</button>
+</div>
+
+<!-- ─── FIRST-RUN WIZARD MODAL ────────────────────────────── -->
+<div id="wizard-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.82);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#111;border:1px solid #e8a52540;border-radius:8px;width:min(520px,92vw);padding:32px;font-family:'DM Mono',monospace;color:#f0e8d0;position:relative;">
+    <div style="font-size:11px;letter-spacing:3px;color:#e8a525;margin-bottom:6px;">NIBCAST // QUICK START</div>
+    <div id="wiz-title" style="font-size:20px;font-weight:600;margin-bottom:4px;">Welcome to NibCast</div>
+    <div id="wiz-subtitle" style="font-size:12px;color:#888;margin-bottom:24px;">Let's get you set up in 3 steps — takes about 2 minutes.</div>
+
+    <!-- Step indicators -->
+    <div style="display:flex;gap:6px;margin-bottom:28px;" id="wiz-steps">
+      <div class="wiz-step active" id="wiz-dot-1" style="flex:1;height:3px;background:#e8a525;border-radius:2px;transition:background .3s"></div>
+      <div class="wiz-step"        id="wiz-dot-2" style="flex:1;height:3px;background:#333;border-radius:2px;transition:background .3s"></div>
+      <div class="wiz-step"        id="wiz-dot-3" style="flex:1;height:3px;background:#333;border-radius:2px;transition:background .3s"></div>
+    </div>
+
+    <!-- Step 1: API Key -->
+    <div id="wiz-step-1">
+      <div style="font-size:13px;margin-bottom:16px;line-height:1.7;">
+        NibCast uses <strong style="color:#e8a525">Groq</strong> for voice recognition — it's <strong>free</strong> (7,200 min/day).<br>
+        <span style="color:#888;font-size:11px;">No credit card. Takes 30 seconds to get a key.</span>
+      </div>
+      <ol style="font-size:12px;line-height:2;color:#aaa;padding-left:18px;margin-bottom:20px;">
+        <li>Click <strong style="color:#e8a525">Open Groq Console</strong> below</li>
+        <li>Sign in with Google / GitHub</li>
+        <li>Click <em>Create API Key</em> and copy it</li>
+        <li>Paste it in the box and click Save</li>
+      </ol>
+      <a href="https://console.groq.com/keys" target="_blank" class="btn-ghost" style="display:inline-block;margin-bottom:16px;padding:8px 16px;font-size:11px;letter-spacing:2px;text-decoration:none;">OPEN GROQ CONSOLE ↗</a>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input id="wiz-api-key" type="password" placeholder="Paste your Groq API key here…" style="flex:1;background:#1a1a1a;border:1px solid #333;color:#f0e8d0;padding:10px 12px;border-radius:4px;font-family:inherit;font-size:12px;" oninput="wizKeyChanged()">
+        <button class="btn-ghost" id="wiz-save-btn" onclick="wizSaveKey()" style="padding:8px 14px;font-size:10px;letter-spacing:2px;" disabled>SAVE</button>
+      </div>
+      <div id="wiz-key-status" style="font-size:11px;color:#888;margin-top:8px;min-height:16px;"></div>
+    </div>
+
+    <!-- Step 2: Hotkey -->
+    <div id="wiz-step-2" style="display:none">
+      <div style="font-size:13px;margin-bottom:20px;line-height:1.7;">
+        NibCast works in <strong>any app</strong> — Word, Chrome, VS Code, Slack, anywhere.<br>
+        <span style="color:#888;font-size:11px;">Hold a hotkey, speak, release — your words appear instantly.</span>
+      </div>
+      <div style="background:#1a1a1a;border:1px solid #333;border-radius:6px;padding:16px;margin-bottom:20px;">
+        <div style="font-size:11px;letter-spacing:2px;color:#e8a525;margin-bottom:12px;">DEFAULT HOTKEYS</div>
+        <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12px;line-height:1.8;">
+          <span style="color:#e8a525;font-weight:600">Ctrl+Alt+V</span><span style="color:#aaa">Hold to record, release to paste</span>
+          <span style="color:#e8a525;font-weight:600">Ctrl+Alt+Space</span><span style="color:#aaa">Toggle recording on/off</span>
+          <span style="color:#e8a525;font-weight:600">Ctrl+Alt+Z</span><span style="color:#aaa">Undo last dictation</span>
+        </div>
+      </div>
+      <div style="font-size:12px;color:#888;margin-bottom:16px;">Or set a <strong style="color:#f0e8d0">wake word</strong> (like "Hey Flow") to go completely hands-free — like Siri.</div>
+    </div>
+
+    <!-- Step 3: Done -->
+    <div id="wiz-step-3" style="display:none;text-align:center;">
+      <div style="font-size:40px;margin-bottom:12px;">🎙️</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px;color:#e8a525;">You're all set!</div>
+      <div style="font-size:12px;color:#aaa;line-height:1.8;margin-bottom:24px;">
+        Open any text field in any app.<br>
+        Hold <strong style="color:#e8a525">Ctrl+Alt+V</strong> and speak.<br>
+        Release — your text appears instantly.
+      </div>
+      <div style="font-size:11px;color:#666;">The floating orb in the corner shows recording status.<br>Explore the Config panel to customise everything.</div>
+    </div>
+
+    <!-- Navigation -->
+    <div style="display:flex;justify-content:space-between;margin-top:28px;align-items:center;">
+      <button id="wiz-back" onclick="wizBack()" style="background:none;border:none;color:#666;font-family:inherit;font-size:11px;letter-spacing:2px;cursor:pointer;display:none;">← BACK</button>
+      <div style="flex:1"></div>
+      <button id="wiz-skip" onclick="wizClose()" style="background:none;border:none;color:#666;font-family:inherit;font-size:11px;letter-spacing:2px;cursor:pointer;margin-right:16px;">SKIP</button>
+      <button id="wiz-next" class="btn-ghost" onclick="wizNext()" style="padding:10px 20px;font-size:11px;letter-spacing:2px;">NEXT →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── HEADER ─────────────────────────────────────────── -->
+<div class="vf-header">
+  <div class="vf-brand">
+    <div class="vf-logo-box">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <line x1="3" y1="10" x2="3" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="7" y1="6" x2="7" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="10" y1="3" x2="10" y2="17" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <line x1="13" y1="6" x2="13" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        <line x1="17" y1="10" x2="17" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div>
+      <div class="vf-brand-name">NIBCAST</div>
+      <div class="vf-brand-ver">v2.3 // Multi-Backend</div>
+    </div>
+  </div>
+  <nav class="vf-nav">
+    <button class="vf-tab active" data-panel="status" onclick="switchPanel('status')">01 // STATUS</button>
+    <button class="vf-tab" data-panel="log" onclick="switchPanel('log')">02 // LOG</button>
+    <button class="vf-tab" data-panel="insights" onclick="switchPanel('insights')">03 // INSIGHTS</button>
+    <button class="vf-tab" data-panel="modes" onclick="switchPanel('modes')">04 // MODES</button>
+    <button class="vf-tab" data-panel="config" onclick="switchPanel('config')">05 // CONFIG</button>
+  </nav>
+  <div class="vf-hdr-right">
+    <div class="vf-hdr-status">
+      <div class="vf-dot"></div>
+      <span id="headerStatus">ARMED</span>
+    </div>
+    <button class="vf-hdr-btn" onclick="window.location.href='/api/history/export'">EXPORT</button>
+    <button class="vf-hdr-btn" onclick="refreshAll()">REFRESH</button>
+    <button class="vf-hdr-btn danger" onclick="logout()">LOGOUT</button>
+  </div>
+</div>
+
+<!-- ─── LAYOUT ─────────────────────────────────────────── -->
+<div class="vf-layout">
+
+  <!-- SIDEBAR -->
+  <div class="vf-sidebar">
+    <div class="vf-sb-section">
+      <div class="vf-sb-label">Navigation</div>
+      <button class="vf-sb-btn active" data-panel="status" onclick="switchPanel('status')">
+        <span class="sb-icon">◈</span> Status
+      </button>
+      <button class="vf-sb-btn" data-panel="log" onclick="switchPanel('log')">
+        <span class="sb-icon">≡</span> Log <span class="vf-sb-count" id="sbLogCount">0</span>
+      </button>
+      <button class="vf-sb-btn" data-panel="insights" onclick="switchPanel('insights')">
+        <span class="sb-icon">◎</span> Insights
+      </button>
+      <button class="vf-sb-btn" data-panel="modes" onclick="switchPanel('modes')">
+        <span class="sb-icon">◇</span> Modes
+      </button>
+      <button class="vf-sb-btn" data-panel="config" onclick="switchPanel('config')">
+        <span class="sb-icon">⚙</span> Config
+      </button>
+    </div>
+    <div class="vf-sb-section">
+      <div class="vf-sb-label">Quick Actions</div>
+      <button class="vf-sb-btn" onclick="window.location.href='/api/history/export'">↓ CSV</button>
+      <button class="vf-sb-btn" onclick="exportPDF(false)">↓ PDF</button>
+      <button class="vf-sb-btn" onclick="window.location.href='/api/history/export?mode=dev'" title="All columns including raw speech, status, errors">↓ CSV (Dev)</button>
+      <button class="vf-sb-btn" onclick="exportPDF(true)" title="Developer PDF: raw vs clean, error entries, all metadata">↓ PDF (Dev)</button>
+      <button class="vf-sb-btn" onclick="clearLog()">✕ Clear Log</button>
+      <button class="vf-sb-btn" onclick="openBackupModal()">⊕ Backup</button>
+    </div>
+    <div class="vf-sb-section">
+      <div class="vf-sb-label">Widget Shape</div>
+      <button class="vf-sb-btn" onclick="setWidgetShape('orb')"  id="wsShapeOrb" title="Round orb (default)">⬤ Orb</button>
+      <button class="vf-sb-btn" onclick="setWidgetShape('bar')"  id="wsShapeBar" title="Horizontal pill bar">▬ Bar</button>
+      <button class="vf-sb-btn" onclick="setWidgetShape('chip')" id="wsShapeChip" title="Minimal dot chip">· Chip</button>
+    </div>
+    <div class="vf-sb-section">
+      <div class="vf-sb-label">Widget Icon</div>
+      <button class="vf-sb-btn" onclick="setWidgetStyle('wave')" id="wsBtnWave">◎ Wave (default)</button>
+      <button class="vf-sb-btn" onclick="setWidgetStyle('orbit')" id="wsBtnOrbit">◉ Orbit</button>
+      <button class="vf-sb-btn" onclick="setWidgetStyle('pulse')" id="wsBtnPulse">◈ Pulse</button>
+    </div>
+    <div class="vf-sb-section">
+      <div class="vf-sb-label">Share</div>
+      <button class="vf-sb-btn" onclick="openShareModal()">↗ Share NibCast</button>
+    </div>
+    <div class="vf-sb-bottom">
+      <div class="vf-sb-section">
+        <div class="vf-sb-label">System</div>
+        <button class="vf-sb-btn" onclick="window.open('http://localhost:7171','_blank')">⊞ New Tab</button>
+        <button class="vf-sb-btn" onclick="logout()">⇤ Logout</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── PANEL: STATUS ──────────────────────────────── -->
+  <div id="panel-status" class="vf-panel active">
+
+    <div class="stats-row">
+      <div class="stat">
+        <div class="stat-n" id="statTotal">0</div>
+        <div class="stat-l">Total Sessions</div>
+      </div>
+      <div class="stat stat-r">
+        <div class="stat-n" id="statToday">0</div>
+        <div class="stat-l">Today</div>
+      </div>
+      <div class="stat stat-c">
+        <div class="stat-n" id="statWords">0</div>
+        <div class="stat-l">Words Est.</div>
+      </div>
+      <div class="stat stat-p">
+        <div class="stat-n" id="statAvg">0s</div>
+        <div class="stat-l">Avg Duration</div>
+      </div>
+    </div>
+
+    <div class="status-hero">
+      <div class="status-main">
+        <div class="status-state" id="statusState">ARMED</div>
+        <div class="status-sub">HOLD HOTKEY AND SPEAK TO DICTATE</div>
+        <div class="waveform" id="waveform"></div>
+      </div>
+      <div class="status-side">
+        <div class="hotkey-box">
+          <div class="hotkey-label">// Active Hotkey</div>
+          <div class="hotkey-keys" id="activeHotkeyKeys">
+            <span class="key">CTRL</span><span class="key">SHIFT</span><span class="key">SPACE</span>
+          </div>
+        </div>
+        <div class="mode-box">
+          <div class="mode-label">// Active Target Override</div>
+          <select class="mode-sel" id="targetOverride" onchange="setTargetOverride(this.value)">
+            <option value="">— Auto Detect —</option>
+            <option value="terminal">Terminal</option>
+            <option value="vscode">Code Editor</option>
+            <option value="browser">Browser</option>
+            <option value="chat">Chat / Messaging</option>
+            <option value="email">Email</option>
+            <option value="notes">Notes / Docs</option>
+            <option value="generic">Generic</option>
+          </select>
+        </div>
+        <div class="hotkey-box">
+          <div class="hotkey-label">// Spoken Commands</div>
+          <div style="font-size:11px;color:var(--vf-dim);line-height:1.8">
+            <div>"new line" → newline</div>
+            <div>"comma" → ,</div>
+            <div>"period" → .</div>
+            <div>"delete that" → undo</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live LLM stream box — shown while LLM is processing -->
+    <div id="liveStreamBox" style="display:none;margin-bottom:18px">
+      <div class="stitle" style="margin-bottom:6px">
+        ⟳ LLM CLEANING — LIVE OUTPUT
+        <span style="font-size:9px;color:var(--vf-muted);margin-left:8px">streaming tokens</span>
+      </div>
+      <div id="liveStreamText"
+           style="font-family:var(--vf-font-b);font-size:12px;color:var(--vf-cyan);
+                  background:rgba(37,255,224,0.05);border:1px solid rgba(37,255,224,0.15);
+                  border-radius:4px;padding:10px 14px;line-height:1.7;min-height:36px;
+                  white-space:pre-wrap;word-break:break-word"></div>
+    </div>
+
+    <div style="display:flex;align-items:center;margin-bottom:10px">
+      <div class="stitle" style="flex:1;margin-bottom:0">Recent Transcriptions <span id="recentCountBadge" style="font-family:var(--vf-font-b);font-size:10px;color:var(--vf-muted);font-weight:normal;letter-spacing:1px"></span></div>
+      <button class="log-action" onclick="loadStats();loadHistory();showToast('REFRESHED')" title="Refresh stats and transcriptions">↺ REFRESH</button>
+    </div>
+    <div class="recent-list" id="recentList">
+      <div class="empty">No transcriptions yet</div>
+    </div>
+
+  </div><!-- /panel-status -->
+
+  <!-- ─── PANEL: LOG ──────────────────────────────────── -->
+  <div id="panel-log" class="vf-panel">
+
+    <div class="log-toolbar">
+      <span style="padding:0 14px;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:var(--vf-muted);display:flex;align-items:center">&gt;_</span>
+      <input class="log-search" id="logSearch" placeholder="SEARCH TRANSCRIPTIONS..." oninput="filterLogDebounced()">
+      <select class="log-select" id="logCatFilter" onchange="filterLog()">
+        <option value="">ALL CATEGORIES</option>
+        <option value="terminal">TERMINAL</option>
+        <option value="vscode">VS CODE</option>
+        <option value="browser">BROWSER</option>
+        <option value="chat">CHAT</option>
+        <option value="email">EMAIL</option>
+        <option value="notes">NOTES</option>
+        <option value="generic">GENERIC</option>
+      </select>
+      <button class="log-action" onclick="loadHistory();showToast('REFRESHED')" title="Refresh log">↺</button>
+      <button class="log-action" onclick="exportCSV()">↓ CSV</button>
+      <button class="log-action" onclick="exportPDF(false)">↓ PDF</button>
+      <button class="log-action" onclick="window.location.href='/api/history/export?mode=dev'" title="Developer CSV: all columns">↓ CSV Dev</button>
+      <button class="log-action" onclick="exportPDF(true)" title="Developer PDF: raw vs clean, errors">↓ PDF Dev</button>
+      <button class="log-action d" onclick="clearLog()">✕ CLEAR</button>
+    </div>
+
+    <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px">
+      <span class="stitle" style="flex:1;margin-bottom:0">Transcription Log</span>
+      <span class="count-badge" id="logCount">0 entries</span>
+      <button class="btn-ghost" id="toggleRawBtn" style="padding:2px 10px;font-size:9px;letter-spacing:1px"
+        onclick="toggleShowRaw()" title="Toggle raw vs cleaned transcript view">SHOW RAW</button>
+      <button class="btn-ghost" id="toggleScoreBtn" style="padding:2px 10px;font-size:9px;letter-spacing:1px"
+        onclick="toggleFidelityScore()" title="Show speech-to-text fidelity score per entry">SHOW SCORE</button>
+      <button class="btn-ghost" id="toggleDiscardedBtn" style="padding:2px 10px;font-size:9px;letter-spacing:1px"
+        onclick="toggleDiscarded()" title="Show/hide discarded and system entries">SHOW ALL</button>
+    </div>
+
+    <table class="log-table">
+      <thead>
+        <tr>
+          <th>Time / Date</th><th>Application</th><th>Dur</th><th>Cat</th><th>Transcription</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="logBody">
+        <tr><td colspan="6"><div class="empty" style="border:none">No entries</div></td></tr>
+      </tbody>
+    </table>
+
+  </div><!-- /panel-log -->
+
+  <!-- ─── PANEL: INSIGHTS ─────────────────────────────── -->
+  <div id="panel-insights" class="vf-panel">
+
+    <div class="stitle">Usage — Today / Week / Session</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+      <div style="background:var(--vf-bg-1);border:1px solid var(--vf-b0);border-radius:6px;padding:14px;text-align:center">
+        <div style="font-size:9px;letter-spacing:3px;color:var(--vf-muted);text-transform:uppercase;margin-bottom:8px">Today</div>
+        <div style="font-size:22px;font-weight:700;color:var(--vf-pri)" id="usageTodayWords">—</div>
+        <div style="font-size:10px;color:var(--vf-muted)">words</div>
+        <div style="font-size:11px;color:var(--vf-text);margin-top:4px" id="usageTodayCount">—</div>
+        <div style="font-size:10px;color:var(--vf-muted)">transcriptions · <span id="usageTodayMins">—</span> min</div>
+      </div>
+      <div style="background:var(--vf-bg-1);border:1px solid var(--vf-b0);border-radius:6px;padding:14px;text-align:center">
+        <div style="font-size:9px;letter-spacing:3px;color:var(--vf-muted);text-transform:uppercase;margin-bottom:8px">This Week</div>
+        <div style="font-size:22px;font-weight:700;color:var(--vf-pri)" id="usageWeekWords">—</div>
+        <div style="font-size:10px;color:var(--vf-muted)">words</div>
+        <div style="font-size:11px;color:var(--vf-text);margin-top:4px" id="usageWeekCount">—</div>
+        <div style="font-size:10px;color:var(--vf-muted)">transcriptions · <span id="usageWeekMins">—</span> min</div>
+      </div>
+      <div style="background:var(--vf-bg-1);border:1px solid var(--vf-b0);border-radius:6px;padding:14px;text-align:center">
+        <div style="font-size:9px;letter-spacing:3px;color:var(--vf-muted);text-transform:uppercase;margin-bottom:8px">This Session</div>
+        <div style="font-size:22px;font-weight:700;color:var(--vf-pri)" id="usageSessionWords">—</div>
+        <div style="font-size:10px;color:var(--vf-muted)">words</div>
+        <div style="font-size:11px;color:var(--vf-text);margin-top:4px" id="usageSessionCount">—</div>
+        <div style="font-size:10px;color:var(--vf-muted)">transcriptions · <span id="usageSessionMins">—</span> min</div>
+      </div>
+    </div>
+
+    <div id="usageLangBreakdown" style="margin-bottom:20px;display:none">
+      <div style="font-size:9px;letter-spacing:3px;color:var(--vf-muted);text-transform:uppercase;margin-bottom:8px">Languages Detected</div>
+      <div id="usageLangList" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+    </div>
+
+    <div class="stitle" style="margin-top:0">All-time Insights</div>
+
+    <div class="insights-grid">
+      <div class="insight-card">
+        <div class="ic-label">Words / Session</div>
+        <div class="ic-val" id="insWordsPerSession">—</div>
+        <div class="ic-sub">average transcript length</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Most Used App</div>
+        <div class="ic-val" id="insMostApp">—</div>
+        <div class="ic-sub">by session count</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Peak Hour</div>
+        <div class="ic-val" id="insPeakHour">—</div>
+        <div class="ic-sub">most active time of day</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Success Rate</div>
+        <div class="ic-val" id="insSuccessRate">—</div>
+        <div class="ic-sub">transcriptions with text</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Total Words</div>
+        <div class="ic-val" id="insTotalWords">—</div>
+        <div class="ic-sub">all time</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Longest Session</div>
+        <div class="ic-val" id="insLongestSession">—</div>
+        <div class="ic-sub">max word count</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Avg Duration</div>
+        <div class="ic-val" id="insAvgDuration">—</div>
+        <div class="ic-sub">recording length</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">This Week</div>
+        <div class="ic-val" id="insThisWeek">—</div>
+        <div class="ic-sub">sessions in last 7 days</div>
+      </div>
+    </div>
+
+    <div class="stitle" style="margin-top:24px">Activity Heatmap — Sessions by Hour</div>
+    <div class="heatmap-wrap">
+      <div class="heatmap-labels">
+        <span>12am</span><span>4am</span><span>8am</span><span>12pm</span><span>4pm</span><span>8pm</span>
+      </div>
+      <div class="heatmap" id="heatmapCells"></div>
+    </div>
+
+    <div class="stitle" style="margin-top:24px">Top Applications</div>
+    <div class="apps-bar-list" id="appsBarList">
+      <div class="empty">No data yet</div>
+    </div>
+
+    <div class="stitle" style="margin-top:24px">Category Distribution</div>
+    <div class="apps-bar-list" id="catDistList">
+      <div class="empty">No data yet</div>
+    </div>
+
+    <div class="stitle" style="margin-top:24px">Language &amp; Vocabulary</div>
+    <div class="insights-grid" style="margin-bottom:0">
+      <div class="insight-card">
+        <div class="ic-label">Vocabulary Richness</div>
+        <div class="ic-val" id="insVocabRichness">—</div>
+        <div class="ic-sub">unique / total words</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Tone</div>
+        <div class="ic-val" id="insTone">—</div>
+        <div class="ic-sub">based on filler rate</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Avg Sentence</div>
+        <div class="ic-val" id="insAvgSentence">—</div>
+        <div class="ic-sub">words per sentence</div>
+      </div>
+      <div class="insight-card">
+        <div class="ic-label">Filler Rate</div>
+        <div class="ic-val" id="insFillerRate">—</div>
+        <div class="ic-sub">uh, um, like, you know</div>
+      </div>
+    </div>
+
+    <div class="stitle" style="margin-top:24px">Top 10 Words Used</div>
+    <div class="apps-bar-list" id="topWordsList">
+      <div class="empty">No data yet</div>
+    </div>
+
+  </div><!-- /panel-insights -->
+
+  <!-- ─── PANEL: MODES ────────────────────────────────── -->
+  <div id="panel-modes" class="vf-panel">
+
+    <div class="stitle">Target / Category Override</div>
+    <div style="font-size:11px;color:var(--vf-dim);margin-bottom:14px;line-height:1.6">
+      NibCast detects the app you're dictating into and applies that category's rules
+      (below) automatically. Pick a category here to force it for every dictation
+      regardless of which app is focused — or leave on Auto Detect.
+    </div>
+    <div class="modes-grid" id="targetCards">
+      <div class="mode-card active" data-cat="" onclick="setTargetOverride('')">
+        <span class="mc-active">● ACTIVE</span>
+        <div class="mc-name">AUTO DETECT</div>
+        <div class="mc-desc">Picks a category below based on the focused app. <span id="autoDetectedLabel" style="color:var(--vf-pri)"></span></div>
+      </div>
+      <div class="mode-card" data-cat="terminal" onclick="setTargetOverride('terminal')">
+        <span class="mc-active" style="display:none">● ACTIVE</span>
+        <div class="mc-name">🖥️ TERMINAL</div>
+        <div class="mc-desc">No punctuation or capitalization added; filler words removed. For shells and terminal emulators.</div>
+      </div>
+      <div class="mode-card" data-cat="vscode" onclick="setTargetOverride('vscode')">
+        <span class="mc-active" style="display:none">● ACTIVE</span>
+        <div class="mc-name">💻 CODE EDITOR</div>
+        <div class="mc-desc">No auto-punctuation or capitalization; filler words kept. For VS Code, Vim, Cursor, Sublime.</div>
+      </div>
+      <div class="mode-card" data-cat="browser" onclick="setTargetOverride('browser')">
+        <span class="mc-active" style="display:none">● ACTIVE</span>
+        <div class="mc-name">🌐 BROWSER</div>
+        <div class="mc-desc">Normal punctuation and capitalization; filler words removed. For Chrome, Firefox, Edge.</div>
+      </div>
+      <div class="mode-card" data-cat="chat" onclick="setTargetOverride('chat')">
+        <span class="mc-active" style="display:none">● ACTIVE</span>
+        <div class="mc-name">💬 CHAT</div>
+        <div class="mc-desc">Capitalized, no trailing period — casual tone. For Slack, Discord, Teams, WhatsApp.</div>
+      </div>
+      <div class="mode-card" data-cat="email" onclick="setTargetOverride('email')">
+        <span class="mc-active" style="display:none">● ACTIVE</span>
+        <div class="mc-name">📧 EMAIL</div>
+        <div class="mc-desc">Full punctuation and capitalization, professional tone. For Outlook, Gmail, Thunderbird.</div>
+      </div>
+      <div class="mode-card" data-cat="notes" onclick="setTargetOverride('notes')">
+        <span class="mc-active" style="display:none">● ACTIVE</span>
+        <div class="mc-name">📝 NOTES</div>
+        <div class="mc-desc">Full punctuation and capitalization, structured sentences. For Notion, Obsidian, Word, Docs.</div>
+      </div>
+      <div class="mode-card" data-cat="generic" onclick="setTargetOverride('generic')">
+        <span class="mc-active" style="display:none">● ACTIVE</span>
+        <div class="mc-name">📄 GENERIC</div>
+        <div class="mc-desc">Balanced default cleanup for anything that doesn't match another category.</div>
+      </div>
+    </div>
+
+    <div class="stitle">Per-App Rules</div>
+    <div class="rules-block">
+      <div class="rules-hd">App Target Rules — toggle per-category behavior</div>
+      <div class="rules-row th">
+        <div class="rc th">Target</div>
+        <div class="rc th">Category</div>
+        <div class="rc th">Capitalize</div>
+        <div class="rc th">Add Period</div>
+      </div>
+      <div id="rulesRows">
+        <div class="rules-row">
+          <div class="rc" style="grid-column:1/-1;text-align:center;color:var(--vf-muted);font-size:10px;letter-spacing:2px;padding:24px">Loading rules...</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /panel-modes -->
+
+  <!-- ─── PANEL: CONFIG ───────────────────────────────── -->
+  <div id="panel-config" class="vf-panel">
+
+    <!-- First-run welcome banner (shown once after initial setup) -->
+    <div id="firstRunBanner" style="display:none;background:linear-gradient(135deg,#1a1200,#0d0d0d);
+      border:1px solid var(--vf-pri);border-radius:6px;padding:16px 20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--vf-pri);letter-spacing:2px;margin-bottom:8px">
+        WELCOME TO NIBCAST
+      </div>
+      <div style="font-size:11px;color:var(--vf-text);line-height:1.8;margin-bottom:14px">
+        Setup complete. Two things to do right now:
+        <ol style="margin:8px 0 0 16px;color:var(--vf-text)">
+          <li>Enter a free <b style="color:var(--vf-pri)">Groq API key</b> below — takes 30 seconds at <b>console.groq.com</b></li>
+          <li>Press <b style="color:var(--vf-pri)">Ctrl+Alt+V</b>, speak a sentence, and watch it appear in any app</li>
+        </ol>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn-pri" onclick="scrollToGroqKey()"
+          style="font-size:9px;padding:8px 16px;letter-spacing:2px">[ ADD API KEY ]</button>
+        <button class="btn-ghost" id="createShortcutBtn" onclick="createDesktopShortcut()"
+          style="font-size:9px;padding:8px 16px;letter-spacing:2px">[ CREATE DESKTOP SHORTCUT ]</button>
+        <button class="btn-ghost" onclick="dismissFirstRun()"
+          style="font-size:9px;padding:8px 12px;opacity:0.5">dismiss</button>
+      </div>
+    </div>
+
+    <!-- Status banner -->
+    <div class="cfg-status-banner">
+      <div class="cfg-status-item">
+        <span class="cfg-status-dot" id="cfgApiDot"></span>
+        <span id="cfgApiLabel">API —</span>
+      </div>
+      <div class="cfg-status-item">
+        <span class="cfg-status-dot on"></span>
+        <span id="cfgHkLabel">1 Hotkey</span>
+      </div>
+      <div class="cfg-status-item">
+        <span class="cfg-status-dot on"></span>
+        <span>DB Active</span>
+      </div>
+      <div class="cfg-status-item">
+        <span class="cfg-status-dot on" id="cfgLlmDot"></span>
+        <span>LLM <span id="cfgLlmLabel">On</span></span>
+      </div>
+      <div class="cfg-status-item" id="unsavedBanner" style="display:none;color:var(--vf-orange)">
+        <span class="cfg-status-dot" style="background:var(--vf-orange)"></span>
+        <span>Unsaved</span>
+      </div>
+    </div>
+
+    <!-- Appearance (top, expanded) -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="true">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(90deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Appearance
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">COLLAPSE</span>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">THEME</div>
+        <div class="cfg-val">
+          <div class="theme-cards">
+            <div class="theme-card" data-theme="phosphor" onclick="applyTheme('phosphor')">
+              <div class="theme-preview phosphor-preview">
+                <div class="tp-bar"></div>
+                <div class="tp-bar" style="width:48%"></div>
+              </div>
+              <div class="theme-card-name">Phosphor</div>
+              <div class="theme-card-sub">CRT Terminal</div>
+            </div>
+            <div class="theme-card active" data-theme="foundry" onclick="applyTheme('foundry')">
+              <div class="theme-preview foundry-preview">
+                <div class="tp-bar"></div>
+                <div class="tp-bar" style="width:48%"></div>
+              </div>
+              <div class="theme-card-name">Foundry</div>
+              <div class="theme-card-sub">Warm Luxury</div>
+            </div>
+            <div class="theme-card" data-theme="meridian" onclick="applyTheme('meridian')">
+              <div class="theme-preview meridian-preview">
+                <div class="tp-bar"></div>
+                <div class="tp-bar" style="width:48%"></div>
+              </div>
+              <div class="theme-card-name">Meridian</div>
+              <div class="theme-card-sub">Signal &amp; Data</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">ACCENT_COLOR</div>
+        <div class="cfg-val">
+          <div class="accent-row">
+            <div class="accent-swatches">
+              <div class="accent-swatch active" data-accent="amber" style="background:#d4a742" onclick="applyAccent('amber')"><span class="accent-check">✓</span></div>
+              <div class="accent-swatch" data-accent="coral" style="background:#d46e5a" onclick="applyAccent('coral')"></div>
+              <div class="accent-swatch" data-accent="cyan" style="background:#5ab8d4" onclick="applyAccent('cyan')"></div>
+              <div class="accent-swatch" data-accent="purple" style="background:#9b7ad4" onclick="applyAccent('purple')"></div>
+            </div>
+            <span class="accent-label" id="accentColorName">Amber</span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">UI_FONT</div>
+        <div class="cfg-val">
+          <select class="cfg-select" id="cfgUiFont" onchange="applyUiFont(this.value)">
+            <option value="dm-mono">DM Mono (Default)</option>
+            <option value="ibm-plex">IBM Plex Mono</option>
+            <option value="space-mono">Space Mono</option>
+            <option value="system-mono">System Monospace</option>
+          </select>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">DISPLAY_FONT</div>
+        <div class="cfg-val">
+          <select class="cfg-select" id="cfgDisplayFont" onchange="applyDisplayFont(this.value)">
+            <option value="cormorant">Cormorant Garamond (Default)</option>
+            <option value="serif">Georgia / Serif</option>
+            <option value="mono">Match UI Font</option>
+          </select>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">LIGHT_MODE</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togLightMode" onclick="toggleLightMode()">
+            <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <div>
+              <span class="cfg-tog-lbl">Dark mode active</span>
+              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Switch between dark and light backgrounds</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">VISUAL_EFFECTS</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togEffects" onclick="toggleEffects()">
+            <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl">Scanlines, grain, grid overlays per theme</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Backend -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="true">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(90deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        AI Backend
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">COLLAPSE</span>
+      </div>
+      <div style="padding:8px 16px 4px;font-size:10px;color:var(--vf-muted);line-height:1.7">
+        Switch ASR (speech recognition) and LLM (text cleanup) to any provider.<br>
+        <span style="color:var(--vf-orange)">If NVIDIA ASR returns 404</span> → switch ASR backend to <b>OpenAI</b> and enter an OpenAI key.
+      </div>
+
+      <!-- Quick add — ALL API keys in one place -->
+      <div style="margin:8px 16px 12px;border:1px solid var(--vf-b1);border-radius:6px;padding:10px 12px;background:var(--vf-bg-1)">
+        <div style="font-size:11px;color:var(--vf-text);letter-spacing:1px;margin-bottom:4px">QUICK ADD — ALL API KEYS</div>
+        <div style="font-size:10px;color:var(--vf-muted);margin-bottom:10px;line-height:1.6">
+          Paste any keys you have and TEST each one. Saving/testing a key here does <b>not</b> change your active
+          backend — pick that with the pills below.
+        </div>
+        <div id="quickKeysGrid" style="display:flex;flex-direction:column;gap:7px">
+          <!-- rows injected by buildQuickKeys() -->
+        </div>
+      </div>
+
+      <!-- ASR Backend -->
+      <div class="cfg-row">
+        <div class="cfg-key">ASR_BACKEND</div>
+        <div class="cfg-val">
+          <div class="backend-pills" id="asrBackendPills">
+            <button class="backend-pill active" data-backend="groq"     onclick="setAsrBackend('groq')">Groq ★ Free</button>
+            <button class="backend-pill"         data-backend="deepgram" onclick="setAsrBackend('deepgram')">Deepgram ★ Best</button>
+            <button class="backend-pill"         data-backend="openai"   onclick="setAsrBackend('openai')">OpenAI</button>
+            <button class="backend-pill"         data-backend="nvidia"   onclick="setAsrBackend('nvidia')">NVIDIA</button>
+            <button class="backend-pill"         data-backend="local"    onclick="setAsrBackend('local')">Local</button>
+            <button class="backend-pill"         data-backend="custom"   onclick="setAsrBackend('custom')">Custom</button>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:6px;line-height:1.5">
+            <b style="color:var(--vf-cyan)">Not sure which to pick?</b> Use <b>Groq</b> — free (7,200 min/day) and accurate.
+            For the <b>highest accuracy</b>, add a <b>Deepgram</b> key too and turn on <b>Brain Mode</b> below (Groq + Deepgram = two different engines cross-checking each other).
+          </div>
+        </div>
+      </div>
+      <!-- Groq ASR (default, recommended) -->
+      <div class="asr-groq-fields">
+        <div style="padding:6px 16px 8px;font-size:10px;line-height:1.7;color:var(--vf-muted)">
+          <span style="color:var(--vf-cyan)">★ Recommended free ASR.</span>
+          Get a free key at <b style="color:var(--vf-text)">console.groq.com</b> → API Keys. Free tier: 7,200 min/day.
+        </div>
+        <div class="cfg-row" id="groqKeyRow">
+          <div class="cfg-key">GROQ_API_KEY</div>
+          <div class="cfg-val" style="display:flex;gap:8px;align-items:center">
+            <input class="cfg-in" id="cfgGroqKey" type="password" placeholder="gsk_…" oninput="markUnsaved()" onchange="autoSaveApiKey('GROQ_API_KEY', this)" style="flex:1">
+            <button class="btn-ghost" onclick="testApiKey('groq')" style="white-space:nowrap;padding:8px 12px;font-size:9px;letter-spacing:2px">TEST</button>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">GROQ_ASR_MODEL</div>
+          <div class="cfg-val">
+            <select class="cfg-select" id="cfgGroqAsrModel" onchange="markUnsaved()">
+              <option value="whisper-large-v3-turbo">whisper-large-v3-turbo (fastest, recommended)</option>
+              <option value="whisper-large-v3">whisper-large-v3 (best quality)</option>
+              <option value="distil-whisper-large-v3-en">distil-whisper-large-v3-en (English only, fastest)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- Deepgram ASR (highest accuracy) -->
+      <div class="asr-deepgram-fields" style="display:none">
+        <div style="padding:6px 16px 8px;font-size:10px;line-height:1.7;color:var(--vf-muted)">
+          <span style="color:var(--vf-cyan)">★ Highest accuracy for natural speech.</span>
+          Nova-3 outperforms Whisper on accents, background noise, and fast speech.<br>
+          Get a free key at <b style="color:var(--vf-text)">console.deepgram.com</b> → API Keys. Free tier: 12,000 min/month.
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">DEEPGRAM_API_KEY</div>
+          <div class="cfg-val" style="display:flex;gap:8px;align-items:center">
+            <input class="cfg-in" id="cfgDeepgramKey" type="password" placeholder="Token …" oninput="markUnsaved()" onchange="autoSaveApiKey('DEEPGRAM_API_KEY', this)" style="flex:1">
+            <button class="btn-ghost" onclick="testApiKey('deepgram')" style="white-space:nowrap;padding:8px 12px;font-size:9px;letter-spacing:2px">TEST</button>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">DEEPGRAM_ASR_MODEL</div>
+          <div class="cfg-val">
+            <select class="cfg-select" id="cfgDeepgramAsrModel" onchange="markUnsaved()">
+              <option value="nova-3">nova-3 (best quality, recommended)</option>
+              <option value="nova-2">nova-2 (fast, very accurate)</option>
+              <option value="enhanced">enhanced (older, very fast)</option>
+              <option value="base">base (fastest, basic quality)</option>
+            </select>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">DEEPGRAM_DIARIZE</div>
+          <div class="cfg-val">
+            <div class="cfg-tog-wrap" id="togDeepgramDiarize" onclick="toggleCfg('DEEPGRAM_DIARIZE')" style="width:auto">
+              <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+              <div>
+                <span class="cfg-tog-lbl">Speaker diarization</span>
+                <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Label each person's speech: "Speaker 1: … Speaker 2: …" Useful when multiple people are talking.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- NVIDIA ASR (note: not supported) -->
+      <div class="asr-nvidia-fields" style="display:none">
+        <div style="padding:6px 16px 8px;font-size:10px;color:var(--vf-orange);line-height:1.7">
+          ⚠ NVIDIA's hosted API does not support audio transcription.<br>
+          Their /v1/audio/transcriptions returns 404 for all models.<br>
+          <span style="color:var(--vf-muted)">You can still use NVIDIA for LLM cleanup — just not for ASR.</span>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">NVIDIA_API_KEY</div>
+          <div class="cfg-val" style="display:flex;gap:8px;align-items:center">
+            <input class="cfg-in" id="cfgApiKey" type="password" placeholder="Enter NVIDIA API key (for LLM only)…" oninput="markUnsaved()" onchange="autoSaveApiKey('NVIDIA_API_KEY', this)" style="flex:1">
+            <button class="btn-ghost" id="testApiBtn" onclick="testApiKey('nvidia')" style="white-space:nowrap;padding:8px 12px;font-size:9px;letter-spacing:2px">TEST</button>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">ASR_MODEL</div>
+          <div class="cfg-val" style="display:flex;flex-direction:column;gap:6px">
+            <select class="cfg-select" id="cfgAsrModel" onchange="handleModelChange('asr',this.value)">
+              <option value="nvidia/parakeet-ctc-1.1b-asr">nvidia/parakeet-ctc-1.1b-asr</option>
+              <option value="nvidia/canary-1b-flash">nvidia/canary-1b-flash</option>
+              <option value="nvidia/conformer-ctc-large">nvidia/conformer-ctc-large</option>
+              <option value="__custom__">— Custom Model —</option>
+            </select>
+            <input class="cfg-in" id="cfgAsrModelCustom" placeholder="e.g. nvidia/your-asr-model" style="display:none" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+      </div>
+      <!-- OpenAI ASR -->
+      <div class="asr-openai-fields" style="display:none">
+        <div class="cfg-row">
+          <div class="cfg-key">OPENAI_API_KEY</div>
+          <div class="cfg-val" style="display:flex;gap:8px;align-items:center">
+            <input class="cfg-in" id="cfgOpenaiKey" type="password" placeholder="sk-…" oninput="markUnsaved()" onchange="autoSaveApiKey('OPENAI_API_KEY', this)" style="flex:1">
+            <button class="btn-ghost" id="testApiBtn2" onclick="testApiKey('openai')" style="white-space:nowrap;padding:8px 12px;font-size:9px;letter-spacing:2px">TEST</button>
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">OPENAI_ASR_MODEL</div>
+          <div class="cfg-val">
+            <select class="cfg-select" id="cfgOpenaiAsrModel" onchange="markUnsaved()">
+              <option value="whisper-1">whisper-1 (recommended)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- Local ASR -->
+      <div class="asr-local-fields" style="display:none">
+        <div class="cfg-row">
+          <div class="cfg-key">LOCAL_ASR_URL</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgLocalAsrUrl" placeholder="http://localhost:8000/v1/audio/transcriptions" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">LOCAL_ASR_MODEL</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgLocalAsrModel" placeholder="whisper-1" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+        <div style="padding:8px 16px 12px;font-size:10px;color:var(--vf-muted)">
+          Requires an OpenAI-compatible local ASR server (e.g. whisper.cpp HTTP server, Faster-Whisper server).
+        </div>
+      </div>
+      <!-- Custom ASR -->
+      <div class="asr-custom-fields" style="display:none">
+        <div class="cfg-row">
+          <div class="cfg-key">CUSTOM_ASR_URL</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgCustomAsrUrl" placeholder="https://…/v1/audio/transcriptions" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">CUSTOM_ASR_MODEL</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgCustomAsrModel" placeholder="model name" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">CUSTOM_API_KEY</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgCustomKey" type="password" placeholder="API key (if required)" oninput="markUnsaved()" onchange="autoSaveApiKey('CUSTOM_API_KEY', this)">
+          </div>
+        </div>
+      </div>
+
+      <div class="cfg-row" id="cfgApiStatusRow">
+        <div class="cfg-key">ASR_STATUS</div>
+        <div class="cfg-val" style="display:flex;gap:8px;align-items:center">
+          <div id="cfgApiStatus" style="font-size:11px;color:var(--vf-muted);flex:1">— Not tested yet</div>
+          <button class="btn-ghost" onclick="testAsr()" style="white-space:nowrap;padding:6px 10px;font-size:9px;letter-spacing:2px">TEST ASR</button>
+        </div>
+      </div>
+
+      <!-- LLM Test -->
+      <div class="cfg-row" id="cfgLlmStatusRow">
+        <div class="cfg-key">LLM_STATUS</div>
+        <div class="cfg-val" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <div id="cfgLlmStatus" style="font-size:11px;color:var(--vf-muted);flex:1;min-width:120px">— Not tested yet</div>
+          <button class="btn-ghost" id="testLlmBtn" onclick="testLlm()" style="white-space:nowrap;padding:6px 10px;font-size:9px;letter-spacing:2px">TEST LLM</button>
+        </div>
+      </div>
+      <div id="cfgLlmTestResult" style="display:none;margin:4px 16px 8px;padding:10px 12px;background:var(--vf-b1);border-radius:4px;font-size:11px;font-family:var(--vf-font-b);color:var(--vf-fg);line-height:1.5;word-break:break-word"></div>
+
+      <!-- LLM Backend -->
+      <div style="border-top:1px solid var(--vf-b0);margin-top:4px;padding-top:4px">
+      <div class="cfg-row">
+        <div class="cfg-key">LLM_BACKEND</div>
+        <div class="cfg-val">
+          <div class="backend-pills" id="llmBackendPills">
+            <button class="backend-pill active" data-backend="nvidia"    onclick="setLlmBackend('nvidia')">NVIDIA NIM</button>
+            <button class="backend-pill"         data-backend="groq"     onclick="setLlmBackend('groq')">Groq ★ Free</button>
+            <button class="backend-pill"         data-backend="cerebras" onclick="setLlmBackend('cerebras')">Cerebras ★ Free</button>
+            <button class="backend-pill"         data-backend="gemini"   onclick="setLlmBackend('gemini')">Gemini ★ Free</button>
+            <button class="backend-pill"         data-backend="openai"   onclick="setLlmBackend('openai')">OpenAI</button>
+            <button class="backend-pill"         data-backend="ollama"   onclick="setLlmBackend('ollama')">Ollama</button>
+            <button class="backend-pill"         data-backend="anthropic" onclick="setLlmBackend('anthropic')">Anthropic</button>
+            <button class="backend-pill"         data-backend="custom"   onclick="setLlmBackend('custom')">Custom</button>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:6px;line-height:1.5">
+            <b style="color:var(--vf-cyan)">Not sure which to pick?</b> Use <b>Groq</b> — free, fast, and the cleanest dictation output.
+            <b>Cerebras</b> is an equally-free backup. Avoid <b>NVIDIA</b> for cleanup (it tends to answer your text instead of tidying it).
+          </div>
+        </div>
+      </div>
+      <!-- Groq LLM -->
+      <div class="llm-groq-fields" style="display:none">
+        <div style="padding:6px 16px 8px;font-size:10px;color:var(--vf-cyan)">
+          ★ Recommended free LLM — best all-round cleanup quality, no cost.
+          Uses the same GROQ_API_KEY as ASR. Get it at console.groq.com.
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">GROQ_LLM_MODEL</div>
+          <div class="cfg-val">
+            <select class="cfg-select" id="cfgGroqLlmModel" onchange="markUnsaved()">
+              <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (best quality — recommended for dictation)</option>
+              <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (fastest, lighter cleanup)</option>
+              <option value="mixtral-8x7b-32768">mixtral-8x7b-32768 (legacy)</option>
+            </select>
+            <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Not sure? Keep <b>llama-3.3-70b-versatile</b> — it gives the cleanest dictation output.</div>
+          </div>
+        </div>
+      </div>
+      <!-- Cerebras LLM -->
+      <div class="llm-cerebras-fields" style="display:none">
+        <div style="padding:6px 16px 8px;font-size:10px;color:var(--vf-cyan)">
+          ★ Free &amp; fastest — the best backup to Groq. OpenAI-compatible, ~1M tokens/day.
+          Get a free key at <b style="color:var(--vf-text)">cloud.cerebras.ai</b>.
+        </div>
+        <div style="padding:0 16px 8px;font-size:10px;color:var(--vf-muted)">
+          ⚠ Free-tier inputs may be used to improve the provider's models — avoid for sensitive dictation.
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">CEREBRAS_API_KEY</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgCerebrasKey" type="password" placeholder="csk-…" oninput="markUnsaved()" onchange="autoSaveApiKey('CEREBRAS_API_KEY', this)">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">CEREBRAS_LLM_MODEL</div>
+          <div class="cfg-val">
+            <select class="cfg-select" id="cfgCerebrasLlmModel" onchange="markUnsaved()">
+              <option value="llama-3.3-70b">llama-3.3-70b (best quality — recommended)</option>
+              <option value="qwen-3-235b-a22b-instruct-2507">qwen-3-235b (largest, strongest)</option>
+              <option value="qwen-3-32b">qwen-3-32b (fast)</option>
+              <option value="gpt-oss-120b">gpt-oss-120b</option>
+            </select>
+            <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Not sure? Keep <b>llama-3.3-70b</b> — same family as Groq's best, just on faster hardware.</div>
+          </div>
+        </div>
+      </div>
+      <!-- Gemini LLM -->
+      <div class="llm-gemini-fields" style="display:none">
+        <div style="padding:6px 16px 8px;font-size:10px;color:var(--vf-cyan)">
+          ★ Free Flash tier — strong cleanup, 1M-token context. OpenAI-compatible.
+          Get a free key at <b style="color:var(--vf-text)">aistudio.google.com</b>.
+        </div>
+        <div style="margin:0 16px 8px;padding:8px 10px;border:1px solid var(--vf-orange);border-radius:4px;background:rgba(232,165,37,0.08);font-size:10px;color:var(--vf-orange);line-height:1.5">
+          ⚠ <b>Privacy:</b> Google's <b>FREE</b> Gemini tier uses your prompts — i.e. the text you dictate — to improve its products.
+          For private dictation, use a <b>paid</b> Gemini API key, or pick Groq/Cerebras instead.
+          (Pro models were removed from the free tier in April 2026 — Flash only.)
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">GEMINI_API_KEY</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgGeminiKey" type="password" placeholder="AIza…" oninput="markUnsaved()" onchange="autoSaveApiKey('GEMINI_API_KEY', this)">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">GEMINI_LLM_MODEL</div>
+          <div class="cfg-val">
+            <select class="cfg-select" id="cfgGeminiLlmModel" onchange="markUnsaved()">
+              <option value="gemini-2.5-flash">gemini-2.5-flash (recommended — free, fast)</option>
+              <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (lightest, fastest)</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash (legacy)</option>
+            </select>
+            <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Not sure? Keep <b>gemini-2.5-flash</b> — Pro is no longer free.</div>
+          </div>
+        </div>
+      </div>
+      <!-- NVIDIA LLM -->
+      <div class="llm-nvidia-fields">
+        <div class="cfg-row">
+          <div class="cfg-key">LLM_MODEL</div>
+          <div class="cfg-val" style="display:flex;flex-direction:column;gap:6px">
+            <select class="cfg-select" id="cfgLlmModel" onchange="handleModelChange('llm',this.value)">
+              <option value="meta/llama-3.1-8b-instruct">meta/llama-3.1-8b-instruct</option>
+              <option value="meta/llama-3.1-70b-instruct">meta/llama-3.1-70b-instruct</option>
+              <option value="meta/llama-3.3-70b-instruct">meta/llama-3.3-70b-instruct</option>
+              <option value="mistralai/mistral-7b-instruct-v0.3">mistralai/mistral-7b-instruct-v0.3</option>
+              <option value="nvidia/nemotron-4-340b-instruct">nvidia/nemotron-4-340b-instruct</option>
+              <option value="__custom__">— Custom Model —</option>
+            </select>
+            <input class="cfg-in" id="cfgLlmModelCustom" placeholder="e.g. org/your-llm-model" style="display:none" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+      </div>
+      <!-- OpenAI LLM -->
+      <div class="llm-openai-fields" style="display:none">
+        <div class="cfg-row">
+          <div class="cfg-key">OPENAI_LLM_MODEL</div>
+          <div class="cfg-val">
+            <select class="cfg-select" id="cfgOpenaiLlmModel" onchange="markUnsaved()">
+              <option value="gpt-4o-mini">gpt-4o-mini (fast, cheap)</option>
+              <option value="gpt-4o">gpt-4o (best quality)</option>
+              <option value="gpt-3.5-turbo">gpt-3.5-turbo (legacy)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- Ollama LLM -->
+      <div class="llm-ollama-fields" style="display:none">
+        <div class="cfg-row">
+          <div class="cfg-key">OLLAMA_BASE_URL</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgOllamaUrl" placeholder="http://localhost:11434/v1" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">OLLAMA_LLM_MODEL</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgOllamaModel" placeholder="llama3.2" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+        <div style="padding:8px 16px 12px;font-size:10px;color:var(--vf-muted)">
+          Start Ollama: <code style="color:var(--vf-pri)">ollama run llama3.2</code> — uses local GPU/CPU.
+        </div>
+      </div>
+      <!-- Anthropic LLM -->
+      <div class="llm-anthropic-fields" style="display:none">
+        <div class="cfg-row">
+          <div class="cfg-key">ANTHROPIC_API_KEY</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgAnthropicKey" type="password" placeholder="sk-ant-…" oninput="markUnsaved()" onchange="autoSaveApiKey('ANTHROPIC_API_KEY', this)">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">ANTHROPIC_MODEL</div>
+          <div class="cfg-val">
+            <select class="cfg-select" id="cfgAnthropicModel" onchange="markUnsaved()">
+              <option value="claude-3-5-haiku-20241022">claude-3-5-haiku (fast)</option>
+              <option value="claude-3-5-sonnet-20241022">claude-3-5-sonnet (best)</option>
+              <option value="claude-3-opus-20240229">claude-3-opus (powerful)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <!-- Custom LLM -->
+      <div class="llm-custom-fields" style="display:none">
+        <div class="cfg-row">
+          <div class="cfg-key">CUSTOM_LLM_URL</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgCustomLlmUrl" placeholder="https://…/v1/chat/completions" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">CUSTOM_LLM_MODEL</div>
+          <div class="cfg-val">
+            <input class="cfg-in" id="cfgCustomLlmModel" placeholder="model name" oninput="markUnsaved()" spellcheck="false">
+          </div>
+        </div>
+      </div>
+      </div><!-- /LLM section -->
+
+      <!-- Brain Mode -->
+      <div style="border-top:1px solid var(--vf-b0);margin-top:4px;padding-top:4px">
+      <div class="cfg-row">
+        <div class="cfg-key">BRAIN_MODE</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togBrainMode" onclick="toggleCfg('BRAIN_MODE')" style="margin-bottom:8px">
+            <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <div>
+              <span class="cfg-tog-lbl">Run 2 ASR engines in parallel — pick the better result</span>
+              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Highest accuracy. Slightly slower. Requires a 2nd configured backend.</div>
+            </div>
+          </div>
+          <div style="margin:0 0 8px;padding:8px 10px;border:1px solid var(--vf-cyan);border-radius:4px;background:rgba(80,200,255,0.06);font-size:10px;color:var(--vf-text);line-height:1.5">
+            ★ <b>For best accuracy (~the most you can squeeze out):</b> set your primary ASR to <b>Groq Whisper</b> and the secondary
+            to <b>Deepgram (nova-3)</b>. They use <i>different</i> engines, so when one mishears a word the other usually doesn't —
+            NibCast keeps the better transcript. Picking the <i>same</i> engine twice (e.g. Groq + Groq) gives no accuracy gain.
+          </div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <span style="font-size:10px;color:var(--vf-muted);flex-shrink:0">Secondary engine:</span>
+            <select class="cfg-select" id="cfgBrainSecondary" onchange="markUnsaved()" style="flex:1">
+              <option value="deepgram">Deepgram nova-3 ★ best pairing (different engine)</option>
+              <option value="openai">OpenAI Whisper</option>
+              <option value="local">Local Whisper server (free, private)</option>
+              <option value="groq">Groq Whisper (same engine — no gain)</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      </div><!-- /Brain Mode -->
+
+      <div class="cfg-row">
+        <div class="cfg-key">LANGUAGE</div>
+        <div class="cfg-val">
+          <select class="cfg-select" id="cfgLanguage" onchange="markUnsaved()">
+            <option value="">auto — Detect any language</option>
+            <option value="en">en — English</option>
+            <option value="es">es — Spanish / Español</option>
+            <option value="fr">fr — French / Français</option>
+            <option value="de">de — German / Deutsch</option>
+            <option value="hi">hi — Hindi / हिन्दी</option>
+            <option value="ja">ja — Japanese / 日本語</option>
+            <option value="zh">zh — Chinese / 中文</option>
+            <option value="pt">pt — Portuguese / Português</option>
+            <option value="ar">ar — Arabic / العربية</option>
+            <option value="ko">ko — Korean / 한국어</option>
+            <option value="ru">ru — Russian / Русский</option>
+            <option value="it">it — Italian / Italiano</option>
+            <option value="nl">nl — Dutch / Nederlands</option>
+            <option value="tr">tr — Turkish / Türkçe</option>
+          </select>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Auto-detect works with any of Whisper's 99 supported languages.</div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">TRANSLATE TO EN</div>
+        <div class="cfg-val">
+          <label class="toggle-label">
+            <input type="checkbox" id="cfgTranslateEn" onchange="markUnsaved()">
+            <span class="toggle-track"></span>
+          </label>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Translate speech in any language into English text. Works with all Whisper backends.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Snippet Manager -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="false">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(0deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Snippets
+        <span style="margin-left:8px;font-size:9px;color:var(--vf-muted)">(speak a phrase → paste its expansion)</span>
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">EXPAND</span>
+      </div>
+      <div style="display:none;padding:16px">
+        <div style="font-size:10px;color:var(--vf-muted);margin-bottom:12px;line-height:1.6">
+          Say the exact spoken phrase → NibCast replaces it with the expansion text.<br>
+          Example: say "my email" → pastes <code>you@example.com</code>
+        </div>
+        <div id="snippetList" style="margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px;align-items:flex-start;flex-wrap:wrap">
+          <input id="snipPhrase" type="text" class="cfg-in" placeholder="spoken phrase (e.g. my email)"
+            style="flex:1;min-width:140px" oninput="this.style.borderColor=''">
+          <input id="snipExpand" type="text" class="cfg-in" placeholder="expansion text"
+            style="flex:2;min-width:180px" oninput="this.style.borderColor=''">
+          <button class="btn-ghost" onclick="addSnippet()" style="white-space:nowrap;padding:9px 14px;font-size:9px;letter-spacing:2px">[ ADD ]</button>
+        </div>
+        <div style="font-size:9px;color:var(--vf-muted);margin-top:6px">Phrases are matched case-insensitively at the end of the transcript.</div>
+      </div>
+    </div>
+
+    <!-- VAD Pause Apps -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="false">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(0deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Wake-Word Pause Apps
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">EXPAND</span>
+      </div>
+      <div style="display:none;padding:16px">
+        <div style="font-size:10px;color:var(--vf-muted);margin-bottom:10px;line-height:1.6">
+          When any of these app names appear in the active window title, NibCast skips wake-word detection.<br>
+          Prevents conflict when another voice dictation app (e.g. Wispr Flow) is in use.
+        </div>
+        <textarea id="cfgVadPauseApps" class="cfg-in" rows="3" style="width:100%;resize:vertical;font-size:11px"
+          placeholder="wispr flow&#10;dragon&#10;voice access" oninput="markUnsaved()"></textarea>
+        <div style="font-size:9px;color:var(--vf-muted);margin-top:4px">One entry per line. Case-insensitive substring match against the active window title.</div>
+      </div>
+    </div>
+
+    <!-- Hotkey Combos -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="true">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(90deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Hotkey Combos
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">COLLAPSE</span>
+      </div>
+      <div style="padding:16px">
+        <div class="hk-builder" id="hkBuilder"></div>
+      </div>
+      <div style="padding:0 16px 14px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn-ghost" onclick="resetHotkeys()" style="font-size:9px;padding:7px 12px;letter-spacing:2px">[ RESET DEFAULTS ]</button>
+        <span style="font-size:10px;color:var(--vf-muted)">Restore Ctrl+Alt+V, Ctrl+Alt+Space, Scroll Lock</span>
+      </div>
+    </div>
+
+    <!-- Recording -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="true">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(90deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Recording Mode
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">COLLAPSE</span>
+      </div>
+      <div style="padding:4px 16px 14px">
+        <div class="rec-mode-grid" id="recordingModePills">
+
+          <!-- HOLD TO TALK — informational, assigned per hotkey -->
+          <div class="rec-mode-card" data-mode="hold" style="cursor:default">
+            <div class="rmc-active" style="display:none">● ACTIVE</div>
+            <div class="rmc-icon">◼</div>
+            <div class="rmc-name">HOLD TO TALK</div>
+            <div class="rmc-desc">Hold hotkey while speaking.<br>Release → text pastes at cursor.</div>
+            <div class="rmc-hotkeys" id="rmcHotkeysHold"></div>
+          </div>
+
+          <!-- HANDS-FREE TOGGLE — informational, assigned per hotkey -->
+          <div class="rec-mode-card" data-mode="toggle" style="cursor:default">
+            <div class="rmc-active" style="display:none">● ACTIVE</div>
+            <div class="rmc-icon">◈</div>
+            <div class="rmc-name">HANDS-FREE</div>
+            <div class="rmc-desc">Press hotkey to start → speak freely → press again to stop → text pastes.</div>
+            <div class="rmc-hotkeys" id="rmcHotkeysToggle"></div>
+          </div>
+
+          <!-- VOICE ACTIVATION — toggle via wake-phrase enabled -->
+          <button class="rec-mode-card" data-mode="voice" onclick="toggleVoiceActivation()">
+            <div class="rmc-active" style="display:none">● ACTIVE</div>
+            <div class="rmc-icon">🎤</div>
+            <div class="rmc-name">VOICE ACTIVATION</div>
+            <div class="rmc-desc">Say your wake phrase → speak → silence auto-stops recording → text pastes.</div>
+            <div class="rmc-hotkeys" id="rmcHotkeysVoice" style="color:var(--vf-muted)">Requires wake phrase below</div>
+          </button>
+
+        </div>
+
+        <!-- Wake-phrase row — always visible, highlighted when voice mode active -->
+        <div id="wakePhraseRow" style="margin-top:10px;padding:10px 14px;border:1px solid var(--vf-b1);border-radius:6px;background:var(--vf-bg-1);transition:border-color .2s">
+          <div style="font-size:10px;letter-spacing:1px;color:var(--vf-muted);margin-bottom:6px">WAKE PHRASE</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="cfg-in" id="cfgWakeWordInline" placeholder='e.g. hey nibcast' oninput="syncWakeWordInputs(this.value);markUnsaved()" spellcheck="false" style="flex:1;margin:0">
+            <div class="cfg-tog-wrap" id="togWakeWordMode" onclick="toggleVoiceActivation()" style="margin:0;white-space:nowrap">
+              <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+              <span class="cfg-tog-lbl" style="font-size:10px">ENABLED</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+            <input class="cfg-in" id="cfgWakeTestInput" placeholder='Type a phrase to test…' spellcheck="false" style="flex:1;margin:0;font-size:10px">
+            <button class="btn-ghost" onclick="testWakePhrase()" style="white-space:nowrap;padding:6px 12px;font-size:9px;letter-spacing:2px">TEST</button>
+          </div>
+          <div id="wakeTestResult" style="font-size:10px;margin-top:5px;min-height:16px;line-height:1.5"></div>
+          <div id="wakePhraseHint" style="font-size:10px;color:var(--vf-muted);margin-top:4px;line-height:1.5">
+            In Voice Activation mode, say this phrase to start recording. It will be stripped from the final text.<br>
+            In Hold / Hands-free mode, enabling this acts as a filter — recordings must begin with this phrase.
+          </div>
+        </div>
+
+        <div style="padding:8px 0 0;font-size:10px;color:var(--vf-muted);line-height:1.7">
+          Assign each hotkey its own mode using the ◼ HOLD / ◈ TOGGLE pill in the hotkey builder below.
+        </div>
+      </div>
+      <div class="cfg-row" id="vadSilenceRow" style="display:none">
+        <div class="cfg-key">VAD_SILENCE_SEC</div>
+        <div class="cfg-val">
+          <div style="display:flex;align-items:center;gap:12px">
+            <input type="range" min="0.5" max="10" step="0.5" value="2" id="cfgVadSilence" class="cfg-range" style="flex:1"
+              oninput="document.getElementById('cfgVadSilenceVal').textContent=parseFloat(this.value).toFixed(1)+'s';markUnsaved()">
+            <span id="cfgVadSilenceVal" style="font-size:12px;color:var(--vf-text);min-width:36px;text-align:right">2.0s</span>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Auto-stop after silence</div>
+        </div>
+      </div>
+      <div class="cfg-row" id="vadThresholdRow" style="display:none">
+        <div class="cfg-key">VAD_THRESHOLD</div>
+        <div class="cfg-val">
+          <div style="display:flex;align-items:center;gap:12px">
+            <input type="range" min="0.005" max="0.15" step="0.005" value="0.050" id="cfgVadThreshold" class="cfg-range" style="flex:1"
+              oninput="document.getElementById('cfgVadThresholdVal').textContent=parseFloat(this.value).toFixed(3);markUnsaved()">
+            <span id="cfgVadThresholdVal" style="font-size:12px;color:var(--vf-text);min-width:46px;text-align:right">0.050</span>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Lower = more sensitive. Speak phrase and click Calibrate to auto-set.</div>
+          <!-- Mic-level meter + calibrate -->
+          <div style="margin-top:8px;display:flex;align-items:center;gap:10px">
+            <div style="flex:1;height:6px;background:var(--vf-b0);border-radius:3px;overflow:hidden">
+              <div id="micLevelBar" style="height:100%;width:0%;background:var(--vf-pri);border-radius:3px;transition:width 0.1s"></div>
+            </div>
+            <span id="micLevelVal" style="font-size:10px;color:var(--vf-muted);min-width:42px;text-align:right">0.000</span>
+            <button class="btn-ghost" style="padding:2px 10px;font-size:9px;letter-spacing:1px" onclick="calibrateVad()">CALIBRATE</button>
+          </div>
+          <div style="font-size:9px;color:var(--vf-muted);margin-top:3px">Speak your wake phrase → click CALIBRATE to auto-set threshold</div>
+        </div>
+      </div>
+      <!-- Legacy hidden input kept so loadConfig/saveConfig still work -->
+      <input type="hidden" id="cfgWakeWord">
+
+      <!-- Voice enrollment — guided 3-step wizard -->
+      <div class="cfg-row" id="voiceEnrollRow" style="display:none">
+        <div class="cfg-key">VOICE MATCH</div>
+        <div class="cfg-val">
+
+          <!-- Status banner -->
+          <div id="enrollStatus" style="font-size:11px;color:var(--vf-muted);margin-bottom:10px">
+            Not enrolled — anyone can trigger the wake phrase
+          </div>
+
+          <!-- Wizard body (hidden until enrollment started) -->
+          <div id="enrollWizard" style="display:none;margin-bottom:10px;background:var(--vf-bg-1);
+            border:1px solid var(--vf-b0);border-radius:6px;padding:14px">
+
+            <!-- Step header -->
+            <div style="font-size:9px;letter-spacing:3px;color:var(--vf-muted);margin-bottom:8px">
+              VOICE ENROLLMENT WIZARD
+            </div>
+
+            <!-- Phrase label -->
+            <div style="margin-bottom:10px;font-size:12px;color:var(--vf-text)">
+              Say: <b id="enrollPhraseLabel" style="color:var(--vf-pri);letter-spacing:1px"></b>
+            </div>
+
+            <!-- Progress dots -->
+            <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+              <div id="enrollDot1" style="width:28px;height:28px;border-radius:50%;border:2px solid var(--vf-b1);
+                display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--vf-muted);
+                transition:all .3s">1</div>
+              <div id="enrollDot2" style="width:28px;height:28px;border-radius:50%;border:2px solid var(--vf-b1);
+                display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--vf-muted);
+                transition:all .3s">2</div>
+              <div id="enrollDot3" style="width:28px;height:28px;border-radius:50%;border:2px solid var(--vf-b1);
+                display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--vf-muted);
+                transition:all .3s">3</div>
+              <span id="enrollMsg" style="font-size:11px;color:var(--vf-muted);margin-left:6px">
+                Click RECORD SAMPLE, then say the phrase
+              </span>
+            </div>
+
+            <!-- Mic level bar during recording -->
+            <div id="enrollMicRow" style="display:none;margin-bottom:10px">
+              <div style="font-size:9px;letter-spacing:2px;color:var(--vf-muted);margin-bottom:4px">MIC LEVEL</div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <div style="flex:1;height:8px;background:var(--vf-b0);border-radius:4px;overflow:hidden">
+                  <div id="enrollMicBar" style="height:100%;width:0%;background:var(--vf-pri);border-radius:4px;transition:width 0.08s"></div>
+                </div>
+                <span id="enrollCountdown" style="font-size:16px;font-weight:700;color:var(--vf-pri);min-width:28px;text-align:right">3</span>
+              </div>
+            </div>
+
+            <!-- Record button -->
+            <button id="enrollRecordBtn" class="btn-pri" style="font-size:9px;letter-spacing:2px;padding:9px 18px"
+              onclick="enrollRecordSample()">[ RECORD SAMPLE ]</button>
+            <button class="btn-ghost" style="font-size:9px;letter-spacing:1px;padding:9px 12px;margin-left:8px"
+              onclick="cancelEnrollment()">CANCEL</button>
+          </div>
+
+          <!-- Action buttons (shown when not in wizard) -->
+          <div id="enrollActions" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-ghost" id="enrollStartBtn" style="padding:6px 14px;font-size:9px;letter-spacing:2px"
+              onclick="startEnrollment()">[ ENROLL MY VOICE ]</button>
+            <button class="btn-ghost" id="enrollClearBtn" style="padding:6px 14px;font-size:9px;letter-spacing:2px;display:none"
+              onclick="clearEnrollment()">CLEAR PROFILE</button>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:8px;line-height:1.7">
+            Teaches NibCast to recognise only your voice.<br>
+            3 short recordings → only your mic can trigger the wake phrase.
+          </div>
+
+          <!-- Match strictness — fixes "wake works but my command is silently discarded" -->
+          <div style="margin-top:12px;border-top:1px solid var(--vf-b0);padding-top:10px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:10px;color:var(--vf-muted);min-width:110px">Match strictness</span>
+              <input type="range" id="cfgVoiceSimThreshold" min="0.30" max="0.95" step="0.01"
+                     oninput="document.getElementById('voiceSimVal').textContent=this.value;markUnsaved()"
+                     style="flex:1">
+              <span id="voiceSimVal" style="font-size:11px;color:var(--vf-pri);min-width:34px;text-align:right">0.62</span>
+            </div>
+            <div style="font-size:10px;color:var(--vf-muted);margin-top:4px;line-height:1.6">
+              Lower = more forgiving (accepts your voice on an off day); higher = stricter (fewer impostors).
+              <b style="color:var(--vf-orange)">If your own commands get rejected after the wake word, lower this.</b>
+            </div>
+            <div class="cfg-tog-wrap" id="togVoiceEnroll" onclick="toggleCfg('VOICE_ENROLLMENT_ENABLED')" style="margin-top:8px;width:auto">
+              <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+              <div>
+                <span class="cfg-tog-lbl">Require my voice for commands</span>
+                <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Off = anyone who says the wake phrase can dictate (no speaker check).</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Advanced — Wake Word Timing -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="false">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(0deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Advanced — Wake Word Timing
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">EXPAND</span>
+      </div>
+      <div class="cfg-row" style="display:none">
+        <div class="cfg-key">WAKE_WORD_SILENCE_SEC</div>
+        <div class="cfg-val">
+          <div style="display:flex;align-items:center;gap:12px">
+            <input type="range" min="0.1" max="1.5" step="0.05" value="0.55" id="cfgWakeSilenceSec" class="cfg-range" style="flex:1"
+              oninput="document.getElementById('cfgWakeSilenceSecVal').textContent=parseFloat(this.value).toFixed(2)+'s';markUnsaved()">
+            <span id="cfgWakeSilenceSecVal" style="font-size:12px;color:var(--vf-text);min-width:42px;text-align:right">0.55s</span>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">How long Phase-1 waits for silence before deciding you've finished the wake phrase. Lower = faster response, but raise it if the wake word gets cut off mid-phrase.</div>
+        </div>
+      </div>
+      <div class="cfg-row" style="display:none">
+        <div class="cfg-key">WAKE_WORD_TRIGGER_SEC</div>
+        <div class="cfg-val">
+          <div style="display:flex;align-items:center;gap:12px">
+            <input type="range" min="0.05" max="0.5" step="0.05" value="0.15" id="cfgWakeTriggerSec" class="cfg-range" style="flex:1"
+              oninput="document.getElementById('cfgWakeTriggerSecVal').textContent=parseFloat(this.value).toFixed(2)+'s';markUnsaved()">
+            <span id="cfgWakeTriggerSecVal" style="font-size:12px;color:var(--vf-text);min-width:42px;text-align:right">0.15s</span>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">How long you must be speaking before Phase-1 starts recording. Raise it if background noise keeps triggering false starts.</div>
+        </div>
+      </div>
+      <div class="cfg-row" style="display:none">
+        <div class="cfg-key">WAKE_WORD_MAX_RECORD_SEC</div>
+        <div class="cfg-val">
+          <div style="display:flex;align-items:center;gap:12px">
+            <input type="range" min="1" max="6" step="0.5" value="2.5" id="cfgWakeMaxRecordSec" class="cfg-range" style="flex:1"
+              oninput="document.getElementById('cfgWakeMaxRecordSecVal').textContent=parseFloat(this.value).toFixed(1)+'s';markUnsaved()">
+            <span id="cfgWakeMaxRecordSecVal" style="font-size:12px;color:var(--vf-text);min-width:42px;text-align:right">2.5s</span>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Maximum length of the Phase-1 clip sent for wake-word matching. Raise it if you have a longer wake phrase that's getting truncated.</div>
+        </div>
+      </div>
+      <div class="cfg-row" style="display:none">
+        <div class="cfg-key">WAKE_WORD_LISTEN_SEC</div>
+        <div class="cfg-val">
+          <div style="display:flex;align-items:center;gap:12px">
+            <input type="range" min="5" max="30" step="1" value="12" id="cfgWakeListenSec" class="cfg-range" style="flex:1"
+              oninput="document.getElementById('cfgWakeListenSecVal').textContent=parseFloat(this.value).toFixed(0)+'s';markUnsaved()">
+            <span id="cfgWakeListenSecVal" style="font-size:12px;color:var(--vf-text);min-width:42px;text-align:right">12s</span>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">After the wake word is recognized, how long Phase-2 listens for your command before giving up and going back to sleep.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Output & Cleanup -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="true">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(90deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Output &amp; Cleanup
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">COLLAPSE</span>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">WRITING_STYLE</div>
+        <div class="cfg-val">
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn-ghost" id="btnWritingStyleFlow" onclick="setWritingStyle('flow')" style="font-size:9px;padding:8px 14px;letter-spacing:2px">FLOW</button>
+            <button class="btn-ghost" id="btnWritingStyleVerbatim" onclick="setWritingStyle('verbatim')" style="font-size:9px;padding:8px 14px;letter-spacing:2px">VERBATIM</button>
+            <button class="btn-ghost" id="btnWritingStyleProfessional" onclick="setWritingStyle('professional')" style="font-size:9px;padding:8px 14px;letter-spacing:2px">PROFESSIONAL</button>
+            <button class="btn-ghost" id="btnWritingStyleConcise" onclick="setWritingStyle('concise')" style="font-size:9px;padding:8px 14px;letter-spacing:2px">CONCISE</button>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:6px" id="writingStyleDesc">How the LLM rewrites your speech. FLOW: clean prose, light restructuring (default).</div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">WHISPER_PROMPT</div>
+        <div class="cfg-val">
+          <textarea class="cfg-in" id="cfgWhisperPrompt" rows="2" spellcheck="false"
+            placeholder="e.g. NibCast, Groq, Kubernetes, your name, project or product names…"
+            oninput="markUnsaved()" style="resize:vertical;font-family:var(--vf-font-b)"></textarea>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Your custom dictionary — comma-separated names, jargon, and product terms. The transcriber is biased toward these spellings, and the cleanup LLM also corrects obvious mis-hearings of them (e.g. "cloud code" → "Claude Code").</div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">CLEAN_WITH_LLM</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togCleanLlm" onclick="toggleCfg('CLEAN_WITH_LLM')">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <div>
+              <span class="cfg-tog-lbl">LLM transcript cleanup</span>
+              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Fixes grammar, punctuation</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">APPEND_NEWLINE</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togAppendNl" onclick="toggleCfg('APPEND_NEWLINE')">
+            <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl">Append newline after pasting</span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">PRESERVE_CLIPBOARD</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togPreserveClip" onclick="toggleCfg('PRESERVE_CLIPBOARD')">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl">Restore clipboard after paste</span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">EDIT_BEFORE_PASTE</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togEditBefore" onclick="toggleCfg('EDIT_BEFORE_PASTE')">
+            <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl">Review before pasting</span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">AUDIO_CUES</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togAudioCues" onclick="toggleCfg('AUDIO_CUES')">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl">Play start/stop/error sounds</span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">CUE DETAIL</div>
+        <div class="cfg-val" style="display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+          <div class="cfg-tog-wrap" id="togAudioCueStart" onclick="toggleCfg('AUDIO_CUE_START')" style="gap:6px">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl" style="font-size:10px">Start ding</span>
+          </div>
+          <div class="cfg-tog-wrap" id="togAudioCueStop" onclick="toggleCfg('AUDIO_CUE_STOP')" style="gap:6px">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl" style="font-size:10px">Stop ding</span>
+          </div>
+          <div class="cfg-tog-wrap" id="togAudioCueError" onclick="toggleCfg('AUDIO_CUE_ERROR')" style="gap:6px">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl" style="font-size:10px">Error buzz</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Microphone & Network -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="true">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(90deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Microphone &amp; Network
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">COLLAPSE</span>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">INPUT_DEVICE</div>
+        <div class="cfg-val">
+          <select class="cfg-select" id="cfgInputDevice" onchange="markUnsaved()">
+            <option value="">— System Default —</option>
+          </select>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">SAMPLE_RATE</div>
+        <div class="cfg-val">
+          <select class="cfg-select" id="cfgSampleRate" onchange="markUnsaved()">
+            <option value="16000">16,000 Hz (recommended)</option>
+            <option value="44100">44,100 Hz (CD quality)</option>
+            <option value="48000">48,000 Hz</option>
+          </select>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">HTTP_TIMEOUT</div>
+        <div class="cfg-val">
+          <input class="cfg-in" id="cfgHttpTimeout" type="number" value="30" min="5" max="120" oninput="markUnsaved()">
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">HTTP_RETRIES</div>
+        <div class="cfg-val">
+          <input class="cfg-in" id="cfgHttpRetries" type="number" value="3" min="1" max="10" oninput="markUnsaved()">
+        </div>
+      </div>
+    </div>
+
+    <!-- Startup & Display -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="true">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(90deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Startup &amp; Display
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">COLLAPSE</span>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">LAUNCH AT LOGIN</div>
+        <div class="cfg-val">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <div class="cfg-tog-wrap" id="togAutostart" onclick="toggleAutostart()" style="flex:0 0 auto">
+              <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+              <span class="cfg-tog-lbl">Launch NibCast on Windows login</span>
+            </div>
+            <div class="cfg-tog-wrap" id="togAutostartMinimized" onclick="toggleAutostartMinimized()" style="flex:0 0 auto">
+              <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+              <span class="cfg-tog-lbl" style="font-size:10px">Start minimized (background only)</span>
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Minimized: tray icon only, no widget or dashboard on start</div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">START_MINIMIZED</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togStartMinimized" onclick="toggleCfg('START_MINIMIZED')">
+            <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl">Always start in background (no widget)</span>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Use tray → Toggle Widget to show the orb later</div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">SHOW_WIDGET</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togShowWidgetOnStart" onclick="toggleCfg('SHOW_WIDGET_ON_START')">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <span class="cfg-tog-lbl">Show floating widget on startup</span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">DESKTOP ICON</div>
+        <div class="cfg-val">
+          <button class="btn-ghost" id="createShortcutBtnCfg"
+            onclick="createDesktopShortcut('createShortcutBtnCfg')"
+            style="font-size:9px;padding:8px 16px;letter-spacing:2px">[ CREATE DESKTOP SHORTCUT ]</button>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Adds a NibCast shortcut to your Desktop for quick launching</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Privacy & Data -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="true">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(90deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Privacy &amp; Data
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">COLLAPSE</span>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">PRIVACY_MODE</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togPrivacyMode" onclick="toggleCfg('PRIVACY_MODE')">
+            <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <div>
+              <span class="cfg-tog-lbl">Privacy mode — no transcript logging</span>
+              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Text is not saved to history or log files when enabled</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">CONTEXT_AWARENESS</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togContextAwareness" onclick="toggleCfg('CONTEXT_AWARENESS')">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <div>
+              <span class="cfg-tog-lbl">Context awareness</span>
+              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Detect active app + apply per-app vocabulary hints to ASR</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">AUTO_DELETE</div>
+        <div class="cfg-val">
+          <div style="display:flex;align-items:center;gap:10px">
+            <input class="cfg-in" id="cfgAutoDeleteDays" type="number" value="0" min="0" max="365"
+              style="width:70px" oninput="markUnsaved()" placeholder="0">
+            <span style="font-size:11px;color:var(--vf-muted)">days (0 = never auto-delete)</span>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Automatically delete transcription history older than N days on each launch</div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">PURGE NOW</div>
+        <div class="cfg-val">
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input class="cfg-in" id="cfgPurgeDays" type="number" value="30" min="1" max="365"
+              style="width:70px" placeholder="30">
+            <button class="btn-ghost btn-danger" style="padding:4px 12px;font-size:10px" onclick="purgeOldHistory()">DELETE OLDER THAN N DAYS</button>
+            <button class="btn-ghost" style="padding:4px 12px;font-size:10px" onclick="exportPDF(false)">EXPORT PDF</button>
+          </div>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">PDF export — day-grouped, timestamped. Requires: pip install pymupdf</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save Row -->
+    <div class="btn-row" style="position:sticky;bottom:0;background:var(--vf-bg-0);padding:16px 0;z-index:10;border-top:1px solid var(--vf-b0)">
+      <button class="btn-pri" id="saveCfgBtn" onclick="saveConfig()">[ SAVE CHANGES ]</button>
+      <button class="btn-ghost" onclick="loadConfig();showToast('RELOADED')">[ RESET ]</button>
+      <span class="save-ok" id="saveOkMsg">✓ SAVED</span>
+    </div>
+
+    <!-- Backend Health Check -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="false">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(0deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        Backend Health // Live Status
+        <button class="btn-ghost" style="margin-left:auto;padding:3px 10px;font-size:9px"
+          onclick="event.stopPropagation();checkBackendStatus()">TEST ALL</button>
+      </div>
+      <div class="cfg-row" style="display:none;flex-direction:column;gap:0">
+        <div id="backendStatusPanel" style="padding:12px 16px;font-size:11px;line-height:2">
+          <span style="color:var(--vf-muted)">Click TEST ALL to check backend connectivity</span>
+        </div>
+        <style>
+          .bs-row{display:flex;justify-content:space-between;align-items:center;padding:4px 16px;border-bottom:1px solid var(--vf-b0)}
+          .bs-name{font-size:10px;letter-spacing:2px;color:var(--vf-dim)}
+          .bs-status{font-size:10px;letter-spacing:1px;font-family:var(--vf-font-b)}
+        </style>
+      </div>
+    </div>
+
+    <!-- System // Auto-start + Security -->
+    <div class="cfg-block">
+      <div class="cfg-hd cfg-hd-collapsible" onclick="toggleSection(this)" data-open="false">
+        <span class="cfg-arrow" style="display:inline-block;transform:rotate(0deg);margin-right:4px;font-size:10px;transition:transform .2s">▶</span>
+        System // Auto-Start &amp; Security
+        <span class="cfg-collapse-label" style="margin-left:auto;font-size:9px;opacity:0.5;letter-spacing:1px">EXPAND</span>
+      </div>
+      <div class="cfg-row" style="display:none">
+        <div class="cfg-key">START_WITH_WINDOWS</div>
+        <div class="cfg-val">
+          <div class="tog-wrap" id="togAutostart" onclick="toggleAutostart()">
+            <div class="tog"></div>
+            <span class="tog-lbl">Launch NibCast on Windows startup</span>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row" style="display:none">
+        <div class="cfg-key">CURRENT_PIN</div>
+        <div class="cfg-val"><input class="cfg-in" id="cfgCurrentPin" type="password" placeholder="Current PIN"></div>
+      </div>
+      <div class="cfg-row" style="display:none">
+        <div class="cfg-key">NEW_PIN</div>
+        <div class="cfg-val"><input class="cfg-in" id="cfgNewPin" type="password" placeholder="New PIN (min 4 chars)"></div>
+      </div>
+      <div class="btn-row" style="padding:12px 16px;display:none">
+        <button class="btn-pri" onclick="changePin()">[ UPDATE PIN ]</button>
+        <button class="btn-ghost" onclick="window.location.href='/setup'">[ ADD PATTERN / TOTP ]</button>
+        <button class="btn-danger" onclick="logout()">[ LOGOUT ]</button>
+      </div>
+    </div>
+
+  </div><!-- /panel-config -->
+
+</div><!-- /vf-layout -->
+
+<!-- ─── STATUS BAR ──────────────────────────────────────── -->
+<div class="vf-sbar">
+  <div class="sb">PROC <span class="v" id="sbProc">OK</span></div>
+  <div class="sb">DB <span class="v" id="sbDbRows">0 rows</span></div>
+  <div class="sb">PORT <span class="v">7171</span></div>
+  <div class="sb">THEME <span class="v" id="sbTheme">FOUNDRY</span></div>
+  <div class="sb">AGENT <span class="v" id="sbWidgetStyle">WAVE</span></div>
+  <div class="sb-fill"></div>
+  <div class="sb">NIBCAST <span class="sb-cursor">_</span></div>
+</div>
+
+</div><!-- #root -->
+
+<div class="vf-toast" id="toast"></div>
+
+<!-- Backup Modal -->
+<div class="vf-modal-overlay" id="backupModal" onclick="if(event.target===this)closeBackupModal()" style="display:none">
+  <div class="vf-modal">
+    <div class="vf-modal-hd">
+      <span>⊕ BACKUP DATA</span>
+      <button class="vf-modal-close" onclick="closeBackupModal()">✕</button>
+    </div>
+    <div class="vf-modal-body">
+      <div id="backupInfo" style="font-size:11px;color:var(--vf-muted);margin-bottom:16px">Loading...</div>
+      <div class="cfg-row" style="border:none;padding:0;margin-bottom:12px">
+        <div class="cfg-key" style="font-size:10px">INCLUDE</div>
+        <div class="cfg-val">
+          <label class="bk-check"><input type="checkbox" id="bkConfig" checked> Config (settings, API keys)</label>
+          <label class="bk-check"><input type="checkbox" id="bkDb" checked> Database (all transcription history)</label>
+          <label class="bk-check"><input type="checkbox" id="bkLogs" checked> Log files</label>
+        </div>
+      </div>
+      <div class="bk-files" id="bkFileList"></div>
+    </div>
+    <div class="vf-modal-footer">
+      <button class="btn-pri" onclick="downloadBackup()">[ DOWNLOAD BACKUP ]</button>
+      <button class="btn-ghost" onclick="closeBackupModal()">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Share Modal ───────────────────────────────────── -->
+<div class="vf-modal-overlay" id="shareModal" onclick="if(event.target===this)closeShareModal()" style="display:none">
+  <div class="vf-modal" style="max-width:480px">
+    <div class="vf-modal-hd">
+      Share NibCast
+      <button class="vf-modal-close" onclick="closeShareModal()">✕</button>
+    </div>
+    <div class="vf-modal-body" style="padding:16px 20px">
+      <div style="font-size:11px;color:var(--vf-muted);margin-bottom:14px;line-height:1.6">
+        NibCast is free and open source. Share it with anyone who wants AI voice dictation without a subscription.
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:9px;letter-spacing:2px;color:var(--vf-muted);margin-bottom:6px">GITHUB LINK</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input type="text" id="shareUrl" readonly value="https://github.com/NibCast/nibcast"
+            style="flex:1;background:var(--vf-bg-0);border:1px solid var(--vf-b0);color:var(--vf-text);
+                   font-family:var(--vf-font-b);font-size:11px;padding:8px 10px;outline:none">
+          <button class="btn-pri" onclick="copyShareUrl()" style="white-space:nowrap;padding:8px 14px">[ COPY ]</button>
+        </div>
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:9px;letter-spacing:2px;color:var(--vf-muted);margin-bottom:6px">SHARE MESSAGE</div>
+        <textarea id="shareText" readonly rows="4"
+          style="width:100%;background:var(--vf-bg-0);border:1px solid var(--vf-b0);color:var(--vf-text);
+                 font-family:var(--vf-font-b);font-size:10px;padding:8px 10px;resize:none;outline:none;box-sizing:border-box">Check out NibCast — free, open-source AI voice dictation for Windows. Speak anywhere and your words appear instantly. No subscription, all your own API keys. https://github.com/NibCast/nibcast</textarea>
+        <button class="btn-ghost" onclick="copyShareText()" style="margin-top:6px;font-size:9px;padding:6px 12px">[ COPY MESSAGE ]</button>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+        <a href="https://twitter.com/intent/tweet?text=Check+out+NibCast+%E2%80%94+free+AI+voice+dictation+for+Windows%3A+https%3A%2F%2Fgithub.com%2FNibCast%2Fnibcast"
+           target="_blank" class="btn-ghost" style="font-size:9px;padding:6px 12px;text-decoration:none">Twitter / X</a>
+        <a href="https://www.linkedin.com/shareArticle?mini=true&url=https%3A%2F%2Fgithub.com%2FNibCast%2Fnibcast&title=NibCast+%E2%80%94+Free+AI+Voice+Dictation"
+           target="_blank" class="btn-ghost" style="font-size:9px;padding:6px 12px;text-decoration:none">LinkedIn</a>
+        <a href="https://reddit.com/submit?url=https%3A%2F%2Fgithub.com%2FNibCast%2Fnibcast&title=NibCast+%E2%80%94+Free+open-source+voice+dictation+for+Windows"
+           target="_blank" class="btn-ghost" style="font-size:9px;padding:6px 12px;text-decoration:none">Reddit</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='dashboard.js') }}?v=15"></script>
+</body>
+</html>

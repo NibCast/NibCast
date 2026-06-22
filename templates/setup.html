@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NIBCAST // FIRST RUN</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+<!-- Self-hosted fonts (static/fonts/) — no request to Google, stays fully local. -->
+<link rel="stylesheet" href="{{ url_for('static', filename='fonts/fonts_3a129ba9.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}">
+<style>
+.step{display:none} .step.active{display:block}
+.step-nav{display:flex;gap:6px;margin-bottom:20px}
+.step-pip{flex:1;height:3px;background:var(--b0);border-radius:2px;transition:background .3s}
+.step-pip.done{background:var(--lime)}
+
+/* Pattern grid (same as login) */
+.pattern-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;
+  width:200px;margin:0 auto 16px;padding:14px 0}
+.p-dot{width:24px;height:24px;border-radius:50%;background:var(--b0);border:2px solid var(--dim);
+  cursor:pointer;transition:all .15s;margin:auto}
+.p-dot.lit{background:var(--lime);border-color:var(--lime);box-shadow:0 0 10px rgba(212,255,59,.5)}
+.pattern-hint{text-align:center;font-size:10px;color:var(--gry);letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}
+.pattern-seq{text-align:center;font-size:11px;color:var(--lime);letter-spacing:4px;min-height:18px;margin-bottom:10px}
+.pattern-clear{background:none;border:1px solid var(--b0);color:var(--gry);font-family:var(--fm);
+  font-size:9px;letter-spacing:2px;padding:6px 14px;cursor:pointer;text-transform:uppercase;
+  display:block;margin:0 auto 12px;transition:all .15s}
+.pattern-clear:hover{border-color:var(--lime);color:var(--lime)}
+
+/* TOTP setup */
+.totp-secret{font-family:var(--fm);font-size:18px;letter-spacing:8px;color:var(--lime);text-align:center;
+  background:var(--blk);border:1px solid var(--b0);padding:14px;margin:14px 0;word-break:break-all}
+.totp-hint{font-size:10px;color:var(--gry);letter-spacing:1px;line-height:1.7;margin-bottom:14px}
+.totp-verify{width:100%;padding:14px;background:var(--blk);border:1px solid var(--b0);color:var(--whi);
+  font-family:var(--fm);font-size:24px;letter-spacing:12px;text-align:center;outline:none;transition:all .2s}
+.totp-verify:focus{border-color:var(--lime);box-shadow:inset 0 0 0 1px var(--lime)}
+
+.skip-btn{background:none;border:none;color:var(--gry);font-family:var(--fm);font-size:10px;
+  letter-spacing:2px;text-transform:uppercase;cursor:pointer;padding:8px;display:block;
+  margin:12px auto 0;text-decoration:underline;text-underline-offset:3px}
+.skip-btn:hover{color:var(--lime)}
+</style>
+</head>
+<body>
+<div class="tick tl"></div><div class="tick tr"></div>
+<div class="tick bl"></div><div class="tick br"></div>
+<div class="coord t">// LOCALHOST · 7171 · NC://FIRST-RUN</div>
+<div class="coord b">v2.3 · Multi-Backend · LOCAL AI DICTATION</div>
+
+<div class="wrap">
+  <div class="brand">
+    <div class="brand-logo">NIB<span>CAST</span></div>
+    <div class="brand-sub"><b>// SETUP</b> &nbsp;·&nbsp; SECURE YOUR DASHBOARD</div>
+  </div>
+
+  <div class="box">
+    <div class="box-head">
+      // Security Setup
+      <span class="badge">● STEP <span id="stepNum">1</span>/3</span>
+    </div>
+
+    <!-- Step progress pips -->
+    <div class="step-nav">
+      <div class="step-pip done" id="pip1"></div>
+      <div class="step-pip" id="pip2"></div>
+      <div class="step-pip" id="pip3"></div>
+    </div>
+
+    <div class="err" id="jsErr" style="display:none"></div>
+    <div class="ok"  id="jsOk"  style="display:none"></div>
+
+    <!-- STEP 1: PIN (required) -->
+    <div class="step active" id="step1">
+      <div class="setup-msg">
+        Welcome to NibCast. Set a PIN to protect your dashboard — only you can access it at <code>localhost:7171</code>. Stored as a PBKDF2 hash, never in plaintext.
+      </div>
+      {% if error %}<div class="err">{{ error }}</div>{% endif %}
+      <form method="POST" id="pinForm">
+        <input type="hidden" name="pin_setup" value="1">
+        <div class="field">
+          <label>New PIN (min 4 chars)</label>
+          <input id="pin-input" type="password" name="pin" placeholder="••••"
+                 autofocus minlength="4" maxlength="32" required>
+        </div>
+        <div class="field">
+          <label>Confirm PIN</label>
+          <input id="pin-confirm" type="password" name="pin2" placeholder="••••"
+                 minlength="4" maxlength="32" required>
+        </div>
+        <button class="submit" type="submit"><span>[ SET PIN → ]</span></button>
+      </form>
+    </div>
+
+    <!-- STEP 2: Pattern Lock (optional) -->
+    <div class="step" id="step2">
+      <div class="setup-msg">
+        <b>Optional:</b> Add an Android-style pattern lock as a second way to authenticate.
+        Connect at least 4 dots in a sequence.
+      </div>
+      <div class="pattern-hint">Tap dots to draw your pattern</div>
+      <div class="pattern-seq" id="setupPatternSeq">—</div>
+      <div class="pattern-grid" id="setupPatternGrid"></div>
+      <button class="pattern-clear" onclick="clearSetupPattern()">✕ CLEAR</button>
+      <button class="submit" type="button" onclick="savePattern()">
+        <span>[ SAVE PATTERN → ]</span>
+      </button>
+      <button class="skip-btn" onclick="goStep(3)">SKIP THIS STEP →</button>
+    </div>
+
+    <!-- STEP 3: TOTP (optional) -->
+    <div class="step" id="step3">
+      <div class="setup-msg">
+        <b>Optional:</b> Add Google Authenticator / Authy 2FA. Scan the key below in your app.
+      </div>
+      <div id="totpSetupArea">
+        <button class="submit" type="button" onclick="generateTotp()">
+          <span>[ GENERATE AUTHENTICATOR KEY ]</span>
+        </button>
+      </div>
+      <div id="totpConfirmArea" style="display:none">
+        <div class="totp-hint">
+          Add this key to Google Authenticator or Authy:<br>
+          <b style="color:var(--lime)">NibCast</b>
+        </div>
+        <div class="totp-secret" id="totpSecretDisplay"></div>
+        <div class="totp-hint">Then enter the 6-digit code to confirm:</div>
+        <input class="totp-verify" id="totpVerifyCode" type="text" inputmode="numeric"
+               pattern="[0-9]{6}" maxlength="6" placeholder="000000">
+        <button class="submit" type="button" onclick="confirmTotpSetup()" style="margin-top:12px">
+          <span>[ CONFIRM & SAVE ]</span>
+        </button>
+      </div>
+      <button class="skip-btn" onclick="finishSetup()">SKIP THIS STEP — FINISH</button>
+    </div>
+
+  </div>
+  <div class="hint">YOU CAN CHANGE THESE LATER IN <code>CONFIG → SECURITY</code></div>
+</div>
+
+<script>
+// ── Step flow ─────────────────────────────────────────────────
+function goStep(n) {
+  document.querySelectorAll('.step').forEach((s, i) => {
+    s.classList.toggle('active', i + 1 === n);
+  });
+  document.getElementById('stepNum').textContent = n;
+  for (let i = 1; i <= 3; i++) {
+    const pip = document.getElementById('pip' + i);
+    if (pip) pip.classList.toggle('done', i <= n);
+  }
+}
+
+function showErr(msg) {
+  const e = document.getElementById('jsErr');
+  if (e) { e.textContent = msg; e.style.display = ''; }
+  const o = document.getElementById('jsOk');
+  if (o) o.style.display = 'none';
+}
+function showOk(msg) {
+  const o = document.getElementById('jsOk');
+  if (o) { o.textContent = msg; o.style.display = ''; }
+  const e = document.getElementById('jsErr');
+  if (e) e.style.display = 'none';
+}
+
+// Pin setup goes via traditional form POST, then JS advances to step 2
+// We detect completion by the page reload — the server redirects to /
+// BUT we want 3 steps, so we handle this via AJAX too.
+document.getElementById('pinForm')?.addEventListener('submit', function(ev) {
+  ev.preventDefault();
+  const pin  = document.getElementById('pin-input').value;
+  const pin2 = document.getElementById('pin-confirm').value;
+  if (pin.length < 4) { showErr('PIN MUST BE AT LEAST 4 CHARACTERS'); return; }
+  if (pin !== pin2)    { showErr('PINS DO NOT MATCH'); return; }
+
+  fetch('/api/setup-pin', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({pin})
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) goStep(2);
+    else showErr(d.error || 'Setup failed');
+  })
+  .catch(() => showErr('Connection error'));
+});
+
+// ── Pattern Lock ─────────────────────────────────────────────
+let _setupPattern = [];
+
+(function buildSetupGrid() {
+  const grid = document.getElementById('setupPatternGrid');
+  if (!grid) return;
+  [1,2,3,4,5,6,7,8,9].forEach(n => {
+    const d = document.createElement('div');
+    d.className = 'p-dot';
+    d.dataset.n = n;
+    d.onclick = () => tapSetupDot(n, d);
+    grid.appendChild(d);
+  });
+})();
+
+function tapSetupDot(n, el) {
+  if (_setupPattern.includes(n)) return;
+  _setupPattern.push(n);
+  el.classList.add('lit');
+  document.getElementById('setupPatternSeq').textContent = _setupPattern.join(' — ');
+}
+function clearSetupPattern() {
+  _setupPattern = [];
+  document.querySelectorAll('#setupPatternGrid .p-dot').forEach(d => d.classList.remove('lit'));
+  document.getElementById('setupPatternSeq').textContent = '—';
+}
+function savePattern() {
+  if (_setupPattern.length < 4) { showErr('CONNECT AT LEAST 4 DOTS'); return; }
+  fetch('/api/setup-pattern', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({pattern: _setupPattern.join(',')})
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) { showOk('PATTERN SAVED ✓'); setTimeout(() => goStep(3), 800); }
+    else showErr(d.error || 'Failed to save pattern');
+  })
+  .catch(() => showErr('Connection error'));
+}
+
+// ── TOTP setup ───────────────────────────────────────────────
+function generateTotp() {
+  fetch('/api/setup-totp', { method: 'POST' })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) {
+      document.getElementById('totpSecretDisplay').textContent = d.secret;
+      document.getElementById('totpSetupArea').style.display = 'none';
+      document.getElementById('totpConfirmArea').style.display = '';
+    } else showErr(d.error || 'Failed to generate TOTP');
+  })
+  .catch(() => showErr('Connection error'));
+}
+
+function confirmTotpSetup() {
+  const code = document.getElementById('totpVerifyCode')?.value.trim();
+  if (!code || code.length !== 6) { showErr('ENTER 6-DIGIT CODE FROM YOUR APP'); return; }
+  fetch('/api/confirm-totp', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({code})
+  })
+  .then(r => r.json())
+  .then(d => {
+    if (d.ok) { showOk('AUTHENTICATOR ENABLED ✓'); setTimeout(finishSetup, 1000); }
+    else showErr(d.error || 'Code incorrect — check time sync');
+  })
+  .catch(() => showErr('Connection error'));
+}
+
+function finishSetup() {
+  window.location.href = '/?firstrun=1';
+}
+</script>
+</body>
+</html>

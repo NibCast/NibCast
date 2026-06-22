@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg
+*.egg-info/
+dist/
+build/
+build_pyinstaller/
+*.spec
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# User data (never commit API keys or personal data)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Config with secrets
+config.json
+.env
+.env.*
+
+# Auth credentials (never commit — stored in ~/.NibCast_local/)
+.vf_auth
+.vf_salt
+.vf_totp
+.vf_pattern
+
+# Claude Code session data
+.claude/
+
+# Internal/dev docs — kept local, not published
+CLAUDE.md
+PRD.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Distribution
+*.zip
+*.tar.gz
+*.whl
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/

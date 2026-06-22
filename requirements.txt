@@ -1,0 +1,23 @@
+# ── Core (required on all platforms) ────────────────────────
+sounddevice==0.4.6
+pyotp>=2.9.0
+numpy>=1.26.4,<3
+requests==2.31.0
+pyperclip==1.8.2
+pyautogui==0.9.54
+pynput==1.7.6
+pystray==0.19.5
+Pillow>=10.3.0
+flask==3.0.3
+
+# ── macOS only — required by pyautogui for screen control ───
+pyobjc-core>=9.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=9.0; sys_platform == "darwin"
+pyobjc-framework-AppKit>=9.0; sys_platform == "darwin"
+
+# ── Optional ────────────────────────────────────────────────
+# Uncomment to use desktop_app.py for a native window dashboard
+# pywebview>=5.0
+# Uncomment for PDF history export (AGPL-3.0 — omitted from the prebuilt .exe;
+# install it yourself when running from source if you want PDF export):
+# pymupdf>=1.24.0
