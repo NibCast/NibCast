@@ -591,3 +591,98 @@ mark{background:var(--vf-pri-bg);color:var(--vf-pri);border-radius:2px;padding:0
   border-radius:var(--vf-radius);
 }
 .ic-trend{font-size:10px;letter-spacing:1px;color:var(--vf-cyan);margin-top:4px}
+
+/* ═══════════════════════════════════════════════════════════
+   v2.4 — FLOW POLISH & NATIVE WINDOW  (smoothness pass)
+   Additive layer only: refines spacing, depth and motion so the
+   dashboard reads like a native app instead of a web page in a
+   frame — without altering the Foundry identity. Source order
+   means these rules win the cascade, so the whole layer can be
+   reverted by deleting this block.
+   ═══════════════════════════════════════════════════════════ */
+:root{
+  --vf-shadow-card:0 4px 18px rgba(0,0,0,.30);
+  --vf-shadow-pop:0 12px 36px rgba(0,0,0,.42);
+  --vf-ease:cubic-bezier(.22,.61,.36,1);
+}
+[data-light="true"]{
+  --vf-shadow-card:0 4px 16px rgba(60,50,35,.12);
+  --vf-shadow-pop:0 12px 30px rgba(60,50,35,.18);
+}
+
+/* — consistent, smoother motion on interactive elements (the "flow") — */
+.vf-tab,.vf-sb-btn,.vf-hdr-btn,.btn-pri,.btn-ghost,.btn-danger,
+.backend-pill,.mode-card,.rec-mode-card,.stat,.theme-card,.key,
+.recent-item,.log-action,.accent-swatch{transition:all .18s var(--vf-ease)}
+
+/* — a touch more air so panels breathe like a desktop app — */
+.vf-panel{padding:30px 32px}
+
+/* — panels cross-fade and slide in on switch instead of snapping.
+     Deliberately perceptible (longer + larger travel) so the "flow"
+     actually registers when you change tabs. — */
+.vf-panel.active{animation:vfPanelIn .42s var(--vf-ease) both}
+@keyframes vfPanelIn{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+
+/* — depth on a DARK canvas: a soft drop shadow PLUS a light rim on the
+     top edge (inset highlight) makes cards visibly lift off the page —
+     this is the cue that reads as a real native app, not a web page. — */
+.stats-row,.status-hero,.recent-list,.log-table,.modes-grid,
+.cfg-block,.rules-block,.insight-card,.insight-card-lg,
+.cfg-status-banner,.log-toolbar,.heatmap-wrap,
+.hotkey-box,.mode-box,.hk-entry{
+  box-shadow:0 12px 32px rgba(0,0,0,.50), inset 0 1px 0 rgba(255,255,255,.06);
+}
+[data-light="true"] .stats-row,[data-light="true"] .status-hero,
+[data-light="true"] .recent-list,[data-light="true"] .log-table,
+[data-light="true"] .modes-grid,[data-light="true"] .cfg-block,
+[data-light="true"] .rules-block,[data-light="true"] .insight-card,
+[data-light="true"] .insight-card-lg,[data-light="true"] .cfg-status-banner,
+[data-light="true"] .log-toolbar,[data-light="true"] .heatmap-wrap{
+  box-shadow:0 10px 26px rgba(60,50,35,.16), inset 0 1px 0 rgba(255,255,255,.6);
+}
+.insight-card,.theme-card,.rec-mode-card,.backend-pill{
+  transition:box-shadow .18s var(--vf-ease),transform .18s var(--vf-ease),
+             border-color .18s,background .18s;
+}
+.insight-card:hover,.rec-mode-card:hover{transform:translateY(-3px);box-shadow:var(--vf-shadow-pop)}
+
+/* — smooth, visible hover on list rows (a subtle slide + accent edge)
+     so the UI feels responsive and alive while scanning history — */
+.recent-item,.log-table tr{transition:background .18s var(--vf-ease),
+                                       box-shadow .18s var(--vf-ease),
+                                       transform .18s var(--vf-ease)}
+.recent-item:hover{box-shadow:inset 3px 0 0 var(--vf-pri)}
+.log-table tbody tr:hover{box-shadow:inset 3px 0 0 var(--vf-pri)}
+
+/* — background texture: intentionally LEFT as the original NibCast
+     dot-grid (defined earlier in this file). Per user preference the
+     previous, more-visible texture is the keeper — so the earlier
+     "calmer" override was removed and nothing here touches it. — */
+
+/* ── NATIVE WINDOW CONTROLS ─────────────────────────────────
+   Shown only when running inside the frameless pywebview window
+   (desktop_app.py adds html.is-native on `pywebviewready`).
+   Under the Chrome --app launch, Chrome draws its own titlebar,
+   so these stay hidden and there is no double set of controls. */
+.vf-winctl{display:none;align-items:stretch;margin-left:2px}
+.vf-winbtn{
+  width:44px;border:none;border-left:1px solid var(--vf-b0);background:none;
+  color:var(--vf-dim);font-family:var(--vf-font-b);font-size:13px;line-height:1;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .15s var(--vf-ease);
+}
+.vf-winbtn:hover{background:var(--vf-bg-2);color:var(--vf-text)}
+.vf-winbtn.close:hover{background:#c0392b;color:#fff}
+html.is-native .vf-winctl{display:flex}
+/* under pywebview the brand block is the titlebar grab handle */
+html.is-native .vf-brand{cursor:default;-webkit-user-select:none;user-select:none}
+
+/* ── TIER 3 — gentle readability ────────────────────────────
+   Calms only long-form *content* text (transcripts, descriptions,
+   config keys) for an easier read. The Foundry identity — the
+   all-caps tabs, the `01 // STATUS` labels, the section headers —
+   is left exactly as-is. Tunable / revertable in isolation. */
+.recent-text,.log-txt,.mc-desc,.rmc-desc{letter-spacing:.2px;line-height:1.6}
+.cfg-key{letter-spacing:.3px}
+.status-sub{letter-spacing:2px}

@@ -5,9 +5,28 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
-## [Unreleased]
+## [2.4.0] — 2026-06-29
+
+### Security
+- Dashboard session cookie hardened with `SameSite=Lax` + `HttpOnly`, blocking
+  cross-site use of an authenticated session (CSRF / DNS-rebinding). The server
+  remains bound to `127.0.0.1` only.
 
 ### Added
+- **Native desktop window + dashboard "flow" polish.** The dashboard now reads
+  as a native app: an optional frameless window (`desktop_app.py` / pywebview)
+  with custom titlebar controls — minimize / maximize / close — and a draggable
+  brand area; plus card depth (drop-shadow + top rim-light), cross-fade panel
+  transitions, hover accents, and roomier spacing. The lightweight Chrome
+  `--app` launch keeps its own native titlebar. The original dot-grid background
+  texture is retained.
+- **One-click diagnostics bundle** (sidebar → **Debug Bundle**). Downloads a zip
+  with system info, your settings with **every API key redacted**, and the recent
+  log — so you can file bug reports without leaking secrets.
+- **LLM failover backend** (Config → AI Backend → `LLM_FALLBACK`). When your primary
+  LLM is rate-limited (e.g. Groq's free daily token cap → HTTP 429) or errors,
+  NibCast retries cleanup with a chosen fallback provider instead of dropping to
+  basic cleanup. Opt-in — it never silently switches providers.
 - **Smarter Brain Mode selection.** When two engines process the same input,
   NibCast now *scores* each result and keeps the best, instead of a crude
   word-count / filler-count tie-break:

@@ -62,15 +62,58 @@ def main():
         tray.start()
     threading.Thread(target=_tray_run, daemon=True, name="TrayThread").start()
 
-    webview.create_window(
+    # Frameless window + custom in-page titlebar (the dashboard reveals its
+    # own window controls once `pywebviewready` fires). The brand block in the
+    # header carries the `pywebview-drag-region` class so it acts as the drag
+    # handle; easy_drag stays off so the rest of the UI remains interactive.
+    win_api = _WindowApi()
+    window = webview.create_window(
         title="NibCast",
         url="http://localhost:7171",
         width=1180, height=820, min_size=(900, 600),
-        background_color="#080808",
+        background_color="#0e0c0a",
         text_select=True,
+        frameless=True,
+        easy_drag=False,
+        js_api=win_api,
     )
+    win_api.window = window
     webview.start()
     log.info("👋 Desktop window closed")
+
+
+class _WindowApi:
+    """JS-callable bridge for the custom titlebar's minimize/maximize/close.
+
+    Every call is guarded: pywebview's window methods vary slightly across
+    versions, and a missing method must never crash the UI thread.
+    """
+
+    def __init__(self):
+        self.window = None
+        self._maximized = False
+
+    def minimize(self):
+        try:
+            self.window.minimize()
+        except Exception as e:
+            log.debug(f"window minimize failed: {e}")
+
+    def toggle_maximize(self):
+        try:
+            if self._maximized:
+                self.window.restore()
+            else:
+                self.window.maximize()
+            self._maximized = not self._maximized
+        except Exception as e:
+            log.debug(f"window maximize toggle failed: {e}")
+
+    def close(self):
+        try:
+            self.window.destroy()
+        except Exception as e:
+            log.debug(f"window close failed: {e}")
 
 
 if __name__ == "__main__":

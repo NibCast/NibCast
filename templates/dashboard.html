@@ -8,7 +8,7 @@
 <!-- Fonts are self-hosted (static/fonts/) so the dashboard makes no request to
      Google — keeps NibCast fully local and avoids leaking the user's IP. -->
 <link rel="stylesheet" href="{{ url_for('static', filename='fonts/fonts_f5d4790d.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v=9">
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}?v=12">
 </head>
 <body data-theme="foundry" data-effects="false">
 <div id="root">
@@ -97,7 +97,7 @@
 
 <!-- ─── HEADER ─────────────────────────────────────────── -->
 <div class="vf-header">
-  <div class="vf-brand">
+  <div class="vf-brand pywebview-drag-region">
     <div class="vf-logo-box">
       <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
         <line x1="3" y1="10" x2="3" y2="14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -109,7 +109,7 @@
     </div>
     <div>
       <div class="vf-brand-name">NIBCAST</div>
-      <div class="vf-brand-ver">v2.3 // Multi-Backend</div>
+      <div class="vf-brand-ver">v2.4 // Multi-Backend</div>
     </div>
   </div>
   <nav class="vf-nav">
@@ -127,6 +127,13 @@
     <button class="vf-hdr-btn" onclick="window.location.href='/api/history/export'">EXPORT</button>
     <button class="vf-hdr-btn" onclick="refreshAll()">REFRESH</button>
     <button class="vf-hdr-btn danger" onclick="logout()">LOGOUT</button>
+    <!-- Native window controls — only visible inside the frameless
+         pywebview window (Chrome --app supplies its own titlebar). -->
+    <div class="vf-winctl" id="winCtl">
+      <button class="vf-winbtn" title="Minimize" onclick="winMinimize()">&#9472;</button>
+      <button class="vf-winbtn" title="Maximize" onclick="winMaximize()">&#9633;</button>
+      <button class="vf-winbtn close" title="Close" onclick="winClose()">&#10005;</button>
+    </div>
   </div>
 </div>
 
@@ -161,6 +168,7 @@
       <button class="vf-sb-btn" onclick="exportPDF(true)" title="Developer PDF: raw vs clean, error entries, all metadata">↓ PDF (Dev)</button>
       <button class="vf-sb-btn" onclick="clearLog()">✕ Clear Log</button>
       <button class="vf-sb-btn" onclick="openBackupModal()">⊕ Backup</button>
+      <button class="vf-sb-btn" onclick="downloadDebugBundle()" title="Scrubbed logs + redacted config + system info for bug reports (no API keys included)">⚑ Debug Bundle</button>
     </div>
     <div class="vf-sb-section">
       <div class="vf-sb-label">Widget Shape</div>
@@ -886,6 +894,28 @@
           <div style="font-size:10px;color:var(--vf-muted);margin-top:6px;line-height:1.5">
             <b style="color:var(--vf-cyan)">Not sure which to pick?</b> Use <b>Groq</b> — free, fast, and the cleanest dictation output.
             <b>Cerebras</b> is an equally-free backup. Avoid <b>NVIDIA</b> for cleanup (it tends to answer your text instead of tidying it).
+          </div>
+        </div>
+      </div>
+      <!-- LLM Fallback (failover on rate-limit / error) -->
+      <div class="cfg-row">
+        <div class="cfg-key">LLM_FALLBACK</div>
+        <div class="cfg-val">
+          <select class="cfg-select" id="cfgLlmFallback" onchange="markUnsaved()">
+            <option value="">Off — basic cleanup if primary fails</option>
+            <option value="groq">Groq ★ Free</option>
+            <option value="cerebras">Cerebras ★ Free</option>
+            <option value="gemini">Gemini ★ Free</option>
+            <option value="openai">OpenAI</option>
+            <option value="ollama">Ollama (local)</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="custom">Custom</option>
+          </select>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px;line-height:1.5">
+            If your primary LLM is <b>rate-limited</b> (e.g. Groq's free daily cap → HTTP 429)
+            or errors, NibCast retries cleanup with this provider instead of dropping to
+            basic cleanup. Needs that provider's key set — pick a <b>different</b> one
+            (e.g. primary Groq → fallback <b>Cerebras</b>).
           </div>
         </div>
       </div>
@@ -1804,6 +1834,6 @@
   </div>
 </div>
 
-<script src="{{ url_for('static', filename='dashboard.js') }}?v=15"></script>
+<script src="{{ url_for('static', filename='dashboard.js') }}?v=18"></script>
 </body>
 </html>

@@ -177,7 +177,7 @@ class SettingsWindow:
 
         tk.Label(hdr, text="NIBCAST", bg=BG, fg=TEXT,
                  font=("Consolas", 18, "bold")).place(x=80, y=8)
-        tk.Label(hdr, text="// SETTINGS    v2.3", bg=BG, fg=DIM,
+        tk.Label(hdr, text="// SETTINGS    v2.4", bg=BG, fg=DIM,
                  font=("Consolas", 9)).place(x=80, y=36)
 
         # Top lime accent stripe

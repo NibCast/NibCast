@@ -27,18 +27,20 @@ Press a hotkey (or say a wake phrase) → speak → your words appear in any app
 | **ASR** | Groq Whisper (free), OpenAI, Deepgram Nova-3, local whisper.cpp, custom endpoint |
 | **LLM** | Groq (free), Cerebras (free), Gemini (free), OpenAI, Anthropic Claude, Ollama (local/offline), NVIDIA NIM, custom |
 | **Brain Mode** | Run two ASR (or LLM) engines in parallel and keep the best-scoring result — higher accuracy (opt-in; single-engine Groq stays free) |
+| **LLM failover** | If your primary LLM is rate-limited (e.g. Groq's free daily cap) or errors, auto-retry cleanup on a fallback provider you choose — opt-in, never silent |
 | **Custom dictionary** | Teach it your names, jargon & product terms — biases both transcription *and* LLM cleanup, so "cloud code" → "Claude Code" |
 | **Wake word** | Fuzzy Jaro matching, phonetic alternatives, two-phase VAD state machine, mic-gain-adaptive thresholds |
 | **Voice Match** | Optional speaker verification (off by default) — lock dictation to your enrolled voice; adjustable match strictness |
 | **Per-app smarts** | Learns vocabulary per application; different formatting rules per window type |
 | **Widget** | 3 shapes (Orb, Bar, Chip) × 3 icon styles × 3 colour themes, draggable, live-switch |
 | **Tray** | Background mode, toggle widget, show/hide from right-click menu |
-| **Dashboard** | Full web UI at `localhost:7171` — stats, log, insights, all settings |
+| **Dashboard** | Full web UI at `localhost:7171` — opens as a native app window; stats, log, insights, all settings |
 | **Auth** | PIN / draw-pattern / TOTP (Google Authenticator) with brute-force limiting |
 | **Language** | Auto-detect 99 languages; optional translate-to-English mode |
 | **Usage stats** | Per-day / per-week / per-session word count and transcription count |
 | **Fidelity score** | Optional per-entry score showing how closely the injected text matches what was spoken |
 | **Privacy** | Privacy mode (no history logging), local SQLite only, auto-delete old entries |
+| **Diagnostics** | One-click scrubbed Debug Bundle — redacted config + system info + recent log for bug reports (API keys never included) |
 | **Export** | CSV + PDF (date-grouped, timestamped entries) |
 | **Startup** | Optional Windows login auto-start; minimised/background mode |
 
@@ -90,6 +92,21 @@ python main.py --minimized
 ```
 
 No floating widget, no browser tab. Only the system tray icon. Right-click → **Toggle Widget** to show the orb later. Enable at login via Dashboard → Config → Startup.
+
+### Native desktop window
+
+By default NibCast opens the dashboard in a clean, chromeless **app window**
+(Chrome/Edge `--app` mode) — no tabs, no address bar. For a **true frameless OS
+window** with its own custom titlebar (minimise / maximise / close), a draggable
+header, and a taskbar entry, install pywebview and use the desktop launcher:
+
+```bash
+pip install pywebview
+python desktop_app.py
+```
+
+Both modes serve the same dashboard — pick whichever feels more native. (Without
+pywebview, `desktop_app.py` falls back to the Chrome `--app` window automatically.)
 
 ---
 
@@ -227,6 +244,11 @@ NibCast also **caps the effective wake gate at 0.08** so a stale or over-raised 
 products. For private dictation use a paid Gemini key, or pick Groq/Cerebras. The same
 caveat applies to most no-credit-card free tiers — see [PRIVACY.md](PRIVACY.md).
 
+> 🔁 **Never get stuck on a rate limit.** Set **Config → AI Backend → `LLM_FALLBACK`** to a
+> second free provider (e.g. primary **Groq** → fallback **Cerebras**). If your primary hits
+> its daily cap (HTTP 429), NibCast retries cleanup on the fallback instead of dropping to
+> basic cleanup. Opt-in — it never silently switches providers.
+
 ---
 
 ## Hotkeys (default)
@@ -342,6 +364,7 @@ See [PRIVACY.md](PRIVACY.md) for the full data-flow and [LICENSE](LICENSE) for t
 ```
 nibcast/
 ├── main.py              Entry point + pipeline orchestration
+├── desktop_app.py       Optional native-window launcher (pywebview, frameless)
 ├── config.py            Layered config: defaults → JSON → env vars
 ├── voice_activator.py   VAD with asymmetric EMA (fast attack / slow release)
 ├── audio_recorder.py    Shared sounddevice stream + pre-roll buffer

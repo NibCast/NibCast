@@ -489,6 +489,19 @@ class TextProcessor:
             log.info(f"🧹 LLM cleanup via backend: {backend}")
             result = self._run_backend(system_prompt, raw_text, backend)
 
+        # Failover: if the chosen backend failed (rate-limit / 429 / network error)
+        # and the user opted into a fallback provider, try it before giving up to
+        # basic cleanup. Opt-in only — we never silently send text to a provider the
+        # user didn't choose. Skipped in Brain Mode (it already runs two engines).
+        if not result and not brain_mode:
+            fb = getattr(config, "LLM_FALLBACK_BACKEND", "").strip()
+            if fb and fb.lower() != backend.strip().lower() and _llm_params(fb) is not None:
+                log.warning(f"↪️  [{backend}] cleanup unavailable — falling back to [{fb}]")
+                fb_result = self._run_backend(system_prompt, raw_text, fb)
+                if fb_result:
+                    log.info(f"✅ Fallback [{fb}] cleanup succeeded")
+                    result = fb_result
+
         if not result:
             log.warning(f"[{backend}] LLM returned empty — basic cleanup")
             return self._basic_cleanup(raw_text)

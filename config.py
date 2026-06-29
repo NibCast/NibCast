@@ -53,6 +53,10 @@ LLM_MODEL = "meta/llama-3.3-70b-instruct"
 ASR_BACKEND = "groq"
 # LLM Backend: "groq" | "cerebras" | "gemini" | "nvidia" | "openai" | "ollama" | "anthropic" | "custom"
 LLM_BACKEND = "groq"
+# Optional secondary LLM used ONLY when the primary fails or is rate-limited
+# (e.g. Groq's free daily token cap → HTTP 429). Empty = no failover. Opt-in so
+# the app never silently sends your text to a provider you didn't choose.
+LLM_FALLBACK_BACKEND = ""
 
 # Groq — FREE 7,200 min/day ASR, fastest Whisper, OpenAI-compatible
 GROQ_API_KEY   = ""
@@ -289,7 +293,7 @@ _PERSISTED_KEYS = (
     "AUDIO_CUE_START", "AUDIO_CUE_STOP", "AUDIO_CUE_ERROR",
     "PRIVACY_MODE", "CONTEXT_AWARENESS", "HISTORY_AUTO_DELETE_DAYS",
     # Backends
-    "ASR_BACKEND", "LLM_BACKEND",
+    "ASR_BACKEND", "LLM_BACKEND", "LLM_FALLBACK_BACKEND",
     "GROQ_API_KEY", "GROQ_ASR_MODEL", "GROQ_LLM_MODEL",
     "OPENAI_API_KEY", "OPENAI_ASR_MODEL", "OPENAI_LLM_MODEL",
     "ANTHROPIC_API_KEY", "ANTHROPIC_LLM_MODEL",

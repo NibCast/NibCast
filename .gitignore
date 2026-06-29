@@ -30,7 +30,7 @@ config.json
 .env
 .env.*
 
-# Auth credentials (never commit — stored in ~/.NibCast_local/)
+# Auth credentials (never commit — stored in ~/.nibcast/)
 .vf_auth
 .vf_salt
 .vf_totp

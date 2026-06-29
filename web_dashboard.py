@@ -37,6 +37,15 @@ app = Flask(
 )
 app.config["JSON_SORT_KEYS"] = False
 app.secret_key = auth.get_flask_secret()
+# Harden the session cookie. The dashboard is localhost-only, but SameSite=Lax
+# stops another website from riding an authenticated session via a cross-site
+# request (CSRF / DNS-rebinding), and HttpOnly keeps page scripts from reading
+# the cookie. Secure stays off: this is plain HTTP on 127.0.0.1 where TLS adds
+# no benefit and would only break the cookie.
+app.config.update(
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_HTTPONLY=True,
+)
 DASHBOARD_PORT = 7171
 
 # Live widget reference — set by main.py after the widget is created.
@@ -738,6 +747,99 @@ def api_backup():
     )
 
 
+@app.route("/api/debug-bundle")
+def api_debug_bundle():
+    """A SCRUBBED diagnostics bundle for bug reports: redacted config + system
+    info + the recent log. API keys are NEVER included, so it's safe to attach
+    to a public GitHub issue (still skim the log for personal dictation text)."""
+    import json as _json
+    import platform as _plat
+    import re as _re
+
+    def _app_version():
+        # Read the already-loaded main module's __version__ (single source of
+        # truth) without re-importing it and triggering its side effects.
+        for modname in ("main", "__main__"):
+            v = getattr(sys.modules.get(modname), "__version__", None)
+            if v:
+                return v
+        return "unknown"
+
+    _SECRET_RE = _re.compile(r"(KEY|SECRET|TOKEN|PASSWORD|PIN)", _re.I)
+
+    def _redact(obj):
+        if isinstance(obj, dict):
+            return {k: (f"***REDACTED (len={len(v)})***"
+                       if isinstance(v, str) and v and _SECRET_RE.search(str(k))
+                       else _redact(v))
+                    for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_redact(x) for x in obj]
+        return obj
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 1) Settings with every secret redacted
+        try:
+            with open(config.CONFIG_FILE, "r", encoding="utf-8-sig") as f:
+                cfg = _json.load(f)
+            zf.writestr("config.redacted.json",
+                        _json.dumps(_redact(cfg), indent=2, ensure_ascii=False))
+        except FileNotFoundError:
+            zf.writestr("config.redacted.json", "{}")
+        except Exception as e:
+            zf.writestr("config.redacted.json", f"// could not read config: {e}")
+
+        # 2) System info — no secrets, only which keys are set
+        info = [
+            f"NibCast version : {_app_version()}",
+            f"Generated       : {time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"OS              : {_plat.platform()}",
+            f"Python          : {_plat.python_version()} ({_plat.architecture()[0]})",
+            f"ASR backend     : {getattr(config, 'ASR_BACKEND', '?')}",
+            f"LLM backend     : {getattr(config, 'LLM_BACKEND', '?')}",
+            f"Brain mode      : {getattr(config, 'BRAIN_MODE', False)}",
+            f"Language        : {getattr(config, 'LANGUAGE', '')!r}",
+            f"Privacy mode    : {getattr(config, 'PRIVACY_MODE', False)}",
+            "",
+            "API keys configured (value hidden):",
+        ]
+        for attr in sorted(a for a in dir(config) if a.endswith("_API_KEY")):
+            info.append(f"  {attr:<22}: {'set' if getattr(config, attr, '') else 'not set'}")
+        zf.writestr("system_info.txt", "\n".join(info) + "\n")
+
+        # 3) Recent log tail
+        try:
+            log_path = None
+            for root, _, files in os.walk(config.USER_DIR):
+                for fn in files:
+                    if fn.endswith(".log"):
+                        log_path = os.path.join(root, fn)
+            if log_path:
+                with open(log_path, "r", encoding="utf-8", errors="replace") as f:
+                    zf.writestr("nibcast.log", "".join(f.readlines()[-3000:]))
+        except Exception as e:
+            zf.writestr("nibcast.log", f"// could not read log: {e}")
+
+        # 4) What's inside + a privacy reminder
+        zf.writestr("README.txt",
+            "NibCast diagnostics bundle\n"
+            "==========================\n\n"
+            "  system_info.txt      - versions, OS, selected backends (no secrets)\n"
+            "  config.redacted.json - your settings with every API key REDACTED\n"
+            "  nibcast.log          - the last ~3000 log lines\n\n"
+            "API keys are never included. Before attaching this to a public issue,\n"
+            "skim nibcast.log in case it contains personal dictation text (enable\n"
+            "Privacy Mode to keep transcript text out of logs entirely).\n")
+
+    buf.seek(0)
+    fname = f"nibcast_debug_{time.strftime('%Y%m%d_%H%M%S')}.zip"
+    return Response(
+        buf.read(), mimetype="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
+
+
 @app.route("/api/targets")
 def api_targets():
     return jsonify({
@@ -801,6 +903,7 @@ def api_get_config():
         # Backends
         "ASR_BACKEND": getattr(config, "ASR_BACKEND", "groq"),
         "LLM_BACKEND": getattr(config, "LLM_BACKEND", "groq"),
+        "LLM_FALLBACK_BACKEND": getattr(config, "LLM_FALLBACK_BACKEND", ""),
         "GROQ_API_KEY_MASKED": _mask_key(getattr(config, "GROQ_API_KEY", "") or ""),
         "GROQ_API_KEY_SET":    bool(getattr(config, "GROQ_API_KEY", "")),
         "GROQ_ASR_MODEL": getattr(config, "GROQ_ASR_MODEL", "whisper-large-v3-turbo"),
@@ -948,6 +1051,8 @@ def api_save_config():
         config.ASR_BACKEND = data["ASR_BACKEND"]
     if "LLM_BACKEND" in data and data["LLM_BACKEND"] in ("groq", "cerebras", "gemini", "nvidia", "openai", "ollama", "anthropic", "custom"):
         config.LLM_BACKEND = data["LLM_BACKEND"]
+    if "LLM_FALLBACK_BACKEND" in data and data["LLM_FALLBACK_BACKEND"] in ("", "groq", "cerebras", "gemini", "nvidia", "openai", "ollama", "anthropic", "custom"):
+        config.LLM_FALLBACK_BACKEND = data["LLM_FALLBACK_BACKEND"]
     if "DEEPGRAM_DIARIZE" in data:
         config.DEEPGRAM_DIARIZE = bool(data["DEEPGRAM_DIARIZE"])
     for k in ("GROQ_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "CUSTOM_API_KEY",

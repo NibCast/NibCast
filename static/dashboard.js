@@ -208,6 +208,22 @@ function switchPanel(id) {
   if (id === 'insights') { renderInsights(); loadUsageStats(); }
 }
 
+// ── Native window controls ───────────────────────────────────
+// Wired to the pywebview js_api bridge exposed by desktop_app.py.
+// These buttons only become visible once `pywebviewready` fires
+// (i.e. we're inside the frameless native window). Under the
+// Chrome --app launch the bridge is absent and Chrome's own
+// titlebar provides minimize/maximize/close instead.
+function winMinimize() { try { window.pywebview && pywebview.api.minimize(); } catch (e) {} }
+function winMaximize() { try { window.pywebview && pywebview.api.toggle_maximize(); } catch (e) {} }
+function winClose()    { try { window.pywebview ? pywebview.api.close() : window.close(); } catch (e) { try { window.close(); } catch (_) {} } }
+
+window.addEventListener('pywebviewready', () => {
+  document.documentElement.classList.add('is-native');
+  const c = document.getElementById('winCtl');
+  if (c) c.style.display = 'flex';
+});
+
 // ── Toast ────────────────────────────────────────────────────
 function showToast(msg) {
   const el = document.getElementById('toast');
@@ -822,6 +838,10 @@ function loadConfig() {
       // Backends
       if (d.ASR_BACKEND) { _asrBackend = d.ASR_BACKEND; setAsrBackend(d.ASR_BACKEND); }
       if (d.LLM_BACKEND) { _llmBackend = d.LLM_BACKEND; setLlmBackend(d.LLM_BACKEND); }
+      if (d.LLM_FALLBACK_BACKEND !== undefined) {
+        const fb = document.getElementById('cfgLlmFallback');
+        if (fb) fb.value = d.LLM_FALLBACK_BACKEND || '';
+      }
       if (d.GROQ_API_KEY_MASKED) {
         const e = document.getElementById('cfgGroqKey');
         if (e) e.placeholder = 'Current: ' + d.GROQ_API_KEY_MASKED;
@@ -1213,6 +1233,7 @@ function saveConfig() {
   // Backend fields
   cfg.ASR_BACKEND = _asrBackend;
   cfg.LLM_BACKEND = _llmBackend;
+  cfg.LLM_FALLBACK_BACKEND = document.getElementById('cfgLlmFallback')?.value || '';
 
   const groqKey = document.getElementById('cfgGroqKey')?.value.trim();
   if (groqKey) cfg.GROQ_API_KEY = groqKey;
@@ -2016,6 +2037,12 @@ function downloadBackup() {
   window.location.href = url;
   showToast('BACKUP DOWNLOADING…');
   setTimeout(closeBackupModal, 1200);
+}
+
+// ── Diagnostics bundle (scrubbed — no API keys) ──────────────
+function downloadDebugBundle() {
+  window.location.href = '/api/debug-bundle';
+  showToast('DEBUG BUNDLE DOWNLOADING…');
 }
 
 // ── Transcript quality score (0–100) ─────────────────────────
