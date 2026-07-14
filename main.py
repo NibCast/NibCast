@@ -413,6 +413,35 @@ def _wav_rms(wav_bytes: bytes) -> float:
         return 1.0  # assume non-silent on parse error
 
 
+def _wav_peak_rms(wav_bytes: bytes, window_sec: float = 0.1) -> float:
+    """Max short-window RMS of WAV PCM data (0.0 – 1.0).
+
+    The VAD gate acts on a fast-attack EMA, so what crosses the threshold is
+    the clip's loudest moments — not its average. A media clip can average
+    0.09 RMS yet spike past a 0.19 gate; auto-raise decisions must therefore
+    look at the peak window, or they never fire on exactly the clips that
+    keep triggering.
+    """
+    try:
+        with wave.open(io.BytesIO(wav_bytes)) as wf:
+            sr = wf.getframerate()
+            frames = wf.readframes(wf.getnframes())
+        n = len(frames) // 2
+        if n == 0:
+            return 0.0
+        samples = struct.unpack(f"<{n}h", frames)
+        win = max(1, int(sr * window_sec))
+        peak_sq = 0.0
+        for i in range(0, n, win):
+            chunk = samples[i:i + win]
+            mean_sq = sum(s * s for s in chunk) / len(chunk)
+            if mean_sq > peak_sq:
+                peak_sq = mean_sq
+        return math.sqrt(peak_sq) / 32768.0
+    except Exception:
+        return 1.0  # assume loud on parse error
+
+
 _RMS_SILENCE_THRESHOLD = 0.003  # below this → almost certainly silence
 
 
@@ -722,23 +751,32 @@ def _run_release_pipeline():
                 # never fired on the setups that needed it most and the log
                 # advised threshold values the engine silently clamped away.
                 _MAX_WAKE_THRESHOLD = getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", 0.30)
-                if rms > ww_thr * 0.85 and ww_thr < _MAX_WAKE_THRESHOLD:
-                    # Raise by 8% above observed ambient level — avoid the large
-                    # fixed +0.04 step that previously over-raised the threshold.
-                    new_thr = min(round(rms * 1.08, 2), _MAX_WAKE_THRESHOLD)
+                # Judge by the clip's PEAK window, not its average: the VAD gate
+                # fires on a fast-attack EMA, so a clip averaging 0.09 can spike
+                # past a 0.19 gate. An average-based bar (old: rms > thr*0.85)
+                # never cleared on those clips, so the raise never happened and
+                # the peaks kept triggering forever.
+                peak = _wav_peak_rms(wav_bytes)
+                if peak > ww_thr and ww_thr < _MAX_WAKE_THRESHOLD:
+                    # Just above the peak that crossed the gate — enough to stop
+                    # this source, without jumping straight to the cap.
+                    new_thr = min(round(peak * 1.02, 2), _MAX_WAKE_THRESHOLD)
                     config.WAKE_WORD_VAD_THRESHOLD = new_thr
                     config.save()
                     log.warning(
-                        f"⚠️  Background audio ({rms:.3f} RMS) keeps triggering. "
-                        f"Auto-raised WAKE_WORD_VAD_THRESHOLD {ww_thr} → {new_thr} "
-                        f"(capped at {_MAX_WAKE_THRESHOLD}) and saved to config.json."
+                        f"⚠️  Background audio keeps triggering (avg {rms:.3f}, "
+                        f"peak {peak:.3f} RMS). Auto-raised WAKE_WORD_VAD_THRESHOLD "
+                        f"{ww_thr} → {new_thr} (cap {_MAX_WAKE_THRESHOLD}), saved to "
+                        f"config.json. If the wake phrase stops being detected, use "
+                        f"Config → Wake Phrase → Calibrate."
                     )
                 else:
                     log.warning(
                         f"⚠️  Ambient audio streak ({_ambient_clip_streak}). "
-                        f"threshold={ww_thr} (cap {_MAX_WAKE_THRESHOLD}), ambient RMS={rms:.3f}. "
-                        f"Mute background audio, or lower the microphone input level in "
-                        f"Windows Sound settings — ambient this loud usually means mic gain is high."
+                        f"threshold={ww_thr} (cap {_MAX_WAKE_THRESHOLD}), ambient avg "
+                        f"{rms:.3f} / peak {peak:.3f} RMS. Mute background audio, or "
+                        f"lower the microphone input level in Windows Sound settings — "
+                        f"ambient this loud usually means mic gain is set high."
                     )
             widget.hide()
             if voice_act is not None:

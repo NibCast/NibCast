@@ -25,6 +25,12 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   engine would clamp away. It now raises up to the new ceiling, and the warning
   points at the real remaining fix (mute background audio / lower Windows mic
   input level) instead of suggesting ineffective config values.
+- **Auto-raise now judges clips by their loudest 100 ms window, not their
+  average.** The VAD gate fires on a fast-attack EMA, so background media
+  averaging 0.09 RMS can still spike past a 0.19 gate; the old average-based
+  bar (`avg > threshold × 0.85`) never cleared on exactly those clips, so the
+  raise never happened and the peaks kept triggering. The raise now targets
+  just above the observed peak, capped at the ceiling.
 - **Dashboard threshold slider capped at 0.15** — below the level ambient sits
   at on the affected setups, and partly a dead zone under the old clamp. Slider
   now goes to 0.30, the mic-level meter is rescaled to match, and saving /
