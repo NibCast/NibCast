@@ -171,6 +171,14 @@ VOICE_SIMILARITY_THRESHOLD = 0.50    # 0–1; lower = more permissive; raise if 
 # sitting above room tone. Auto-raised back up if background audio keeps
 # triggering (see main.py Wake L1b).
 WAKE_WORD_VAD_THRESHOLD  = 0.03   # tune down if wake phrase is missed; up if background noise triggers it
+# Hard ceiling for the wake gate. The engine honors WAKE_WORD_VAD_THRESHOLD up
+# to this value and clamps anything above it, so a corrupt config can't make the
+# wake word impossible to say. High-gain mics / loud rooms sit at 0.10–0.17 RMS
+# ambient, so this must stay well above that or raising the threshold silently
+# does nothing (the pre-2.4.1 ceiling of 0.08 caused exactly that: permanent
+# false triggering that no config value could stop). Not persisted — a constant,
+# referenced by voice_activator.py, main.py, and web_dashboard.py.
+WAKE_WORD_VAD_THRESHOLD_MAX = 0.30
 WAKE_WORD_SILENCE_SEC    = 0.70   # 0.55 chopped phrases with a mid-word pause ("hey…jarvis"); 0.70 holds the whole phrase
 WAKE_WORD_TRIGGER_SEC    = 0.15   # reduced from 0.25 → recording fires sooner on voice onset
 WAKE_WORD_MAX_RECORD_SEC = 3.0    # room for the full phrase + trailing silence at the larger silence window

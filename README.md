@@ -211,7 +211,7 @@ The default `WAKE_WORD_VAD_THRESHOLD = 0.03` works for most microphones. If your
 3. Set threshold **20% below** that peak, or click **Calibrate** while speaking
 4. If background noise triggers false detections, raise the threshold slightly
 
-NibCast also **caps the effective wake gate at 0.08** so a stale or over-raised value can never make your voice impossible to detect, and **command-mode silence detection adapts to your mic's noise floor** so quiet mics aren't cut off mid-sentence. If your phrase still isn't detected, lower `WAKE_WORD_VAD_THRESHOLD` toward `0.02`.
+The wake gate also **floats above the measured ambient noise floor automatically**, so a loud room (or a hot mic) stops false-triggering even before you touch the threshold, and **command-mode silence detection adapts to your mic's noise floor** so quiet mics aren't cut off mid-sentence. Configured thresholds are honored up to a hard ceiling of `0.30` (`WAKE_WORD_VAD_THRESHOLD_MAX`) — a corrupt-config guard only. If your phrase still isn't detected, lower `WAKE_WORD_VAD_THRESHOLD` toward `0.02`; if background audio keeps triggering recordings, raise it above the Mic Level meter's idle reading, or lower your microphone's input level in Windows Sound settings.
 
 ---
 
@@ -456,7 +456,8 @@ installed produces a `.exe` that crashes on launch with
 - Click **Calibrate** while speaking the wake phrase to auto-set the threshold
 
 **Wake phrase triggers on background audio / wrong text appears**
-- Raise `WAKE_WORD_VAD_THRESHOLD` in Config → Wake Phrase so ambient noise no longer exceeds it
+- Raise `WAKE_WORD_VAD_THRESHOLD` in Config → Wake Phrase so ambient noise no longer exceeds it (honored up to `0.30`)
+- If the Mic Level meter reads above ~0.10 with nothing playing, your Windows microphone input level is set very high — lower it in `Settings → System → Sound → Microphone`
 - Use a longer, more distinctive phrase — `"hey nibcast"` (3 syllables, unique) is harder to false-trigger than `"hey cache"` (sounds like many English words)
 - Enable **Voice Match** (voice enrollment) so only your voice can trigger the wake phrase
 - After 3 consecutive ambient triggers, NibCast auto-raises the threshold and logs a warning

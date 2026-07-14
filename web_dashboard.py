@@ -1029,7 +1029,9 @@ def api_save_config():
     if "ACTIVATION_MODE" in data and data["ACTIVATION_MODE"] in ("hotkey", "click", "voice", "both"):
         config.ACTIVATION_MODE = data["ACTIVATION_MODE"]
     if "VOICE_VAD_THRESHOLD" in data:
-        try: config.VOICE_VAD_THRESHOLD = max(0.001, float(data["VOICE_VAD_THRESHOLD"]))
+        # Same ceiling as the wake threshold — the dashboard drives both keys
+        # from one slider, so keep their accepted ranges identical.
+        try: config.VOICE_VAD_THRESHOLD = max(0.001, min(getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", 0.30), float(data["VOICE_VAD_THRESHOLD"])))
         except (TypeError, ValueError): pass
     if "VOICE_VAD_SILENCE_SEC" in data:
         try: config.VOICE_VAD_SILENCE_SEC = max(0.5, float(data["VOICE_VAD_SILENCE_SEC"]))
@@ -1081,12 +1083,18 @@ def api_save_config():
         config.WAKE_WORD_ENABLED = bool(data["WAKE_WORD_ENABLED"])
         _wake_changed = True
     if "WAKE_WORD_VAD_THRESHOLD" in data:
+        # Clamp to the same ceiling the VAD engine enforces, so the saved value
+        # is always the effective value — never persist a threshold the engine
+        # would silently clamp away.
         try:
-            config.WAKE_WORD_VAD_THRESHOLD = max(0.01, float(data["WAKE_WORD_VAD_THRESHOLD"]))
+            _thr_max = getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", 0.30)
+            config.WAKE_WORD_VAD_THRESHOLD = max(0.01, min(_thr_max, float(data["WAKE_WORD_VAD_THRESHOLD"])))
         except (TypeError, ValueError):
             pass
     if "WAKE_WORD_SILENCE_SEC" in data:
-        try: config.WAKE_WORD_SILENCE_SEC = max(0.1, float(data["WAKE_WORD_SILENCE_SEC"]))
+        # Floor matches the engine clamp (voice_activator.py sleep branch uses
+        # max(0.3, …)) so the saved value is always the effective value.
+        try: config.WAKE_WORD_SILENCE_SEC = max(0.3, float(data["WAKE_WORD_SILENCE_SEC"]))
         except (TypeError, ValueError): pass
     if "WAKE_WORD_TRIGGER_SEC" in data:
         try: config.WAKE_WORD_TRIGGER_SEC = max(0.05, float(data["WAKE_WORD_TRIGGER_SEC"]))
@@ -1712,7 +1720,8 @@ def api_calibrate_vad():
     rms = _mic_level
     if rms < 0.01:
         return jsonify({"ok": False, "error": "No audio detected — speak first"}), 400
-    new_thr = round(max(0.01, rms * 0.80), 3)
+    _thr_max = getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", 0.30)
+    new_thr = round(min(_thr_max, max(0.01, rms * 0.80)), 3)
     config.WAKE_WORD_VAD_THRESHOLD = new_thr
     config.save()
     return jsonify({"ok": True, "threshold": new_thr, "voice_rms": round(rms, 4)})

@@ -5,7 +5,38 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
-## [2.4.0] — 2026-06-29
+## [2.4.1] — 2026-07-14
+
+### Fixed
+- **Wake-word VAD kept recording on loud-ambient setups no matter what threshold
+  you set.** The engine clamped the effective wake gate to a hard ceiling of
+  `0.08` RMS, while high-gain mics / rooms with background media idle at
+  0.10–0.17 — so raising `WAKE_WORD_VAD_THRESHOLD` (dashboard slider or
+  config.json) was silently ignored and NibCast recorded and discarded ambient
+  clips continuously. The ceiling is now `0.30` (`WAKE_WORD_VAD_THRESHOLD_MAX`
+  in `config.py`, single-sourced everywhere), so configured values are actually
+  honored; it remains only as a corrupt-config guard.
+- **Wake gate now floats above the measured ambient noise floor** (1.5× the
+  idle-room level the activator already tracks), so a loud environment stops
+  false-triggering automatically even before you touch the threshold.
+- **The ambient-streak auto-raise now works on the setups that needed it.** It
+  was capped at the same 0.08 ceiling, so it never fired when the configured
+  threshold was already above 0.08 — and its log advice suggested values the
+  engine would clamp away. It now raises up to the new ceiling, and the warning
+  points at the real remaining fix (mute background audio / lower Windows mic
+  input level) instead of suggesting ineffective config values.
+- **Dashboard threshold slider capped at 0.15** — below the level ambient sits
+  at on the affected setups, and partly a dead zone under the old clamp. Slider
+  now goes to 0.30, the mic-level meter is rescaled to match, and saving /
+  Calibrate clamp to the same ceiling the engine enforces, so the value you see
+  is always the value in effect.
+- **Same bug class in the wake silence slider**: the dashboard accepted
+  `WAKE_WORD_SILENCE_SEC` down to 0.1 s but the engine silently floored it at
+  0.3 s — slider positions 0.1–0.3 did nothing. UI and save clamp now match the
+  engine floor.
+
+No config migration needed: existing `config.json` values are unchanged, and
+thresholds that were previously being silently clamped simply take effect now.
 
 ### Security
 - Dashboard session cookie hardened with `SameSite=Lax` + `HttpOnly`, blocking

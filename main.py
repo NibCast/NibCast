@@ -1,7 +1,7 @@
 # ============================================================
 #  NibCast — Main Entry Point
 # ============================================================
-__version__ = "2.4.0"
+__version__ = "2.4.1"
 
 import sys
 
@@ -716,10 +716,12 @@ def _run_release_pipeline():
             # After 3 consecutive ambient clips: auto-raise threshold and persist it
             if _ambient_clip_streak >= 3 and _ambient_clip_streak % 3 == 0:
                 ww_thr = getattr(config, "WAKE_WORD_VAD_THRESHOLD", 0.10)
-                # Cap matches VoiceActivator._WAKE_THRESHOLD_CEIL: never raise the
-                # gate above a level a normal speaking voice can clear, or the
-                # auto-raise would permanently lock the user out of their own wake word.
-                _MAX_WAKE_THRESHOLD = 0.08
+                # Cap matches the engine ceiling in voice_activator.py — never
+                # suggest or persist a value the VAD would refuse to honor. The
+                # old cap (0.08) sat below loud-room ambient, so the auto-raise
+                # never fired on the setups that needed it most and the log
+                # advised threshold values the engine silently clamped away.
+                _MAX_WAKE_THRESHOLD = getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", 0.30)
                 if rms > ww_thr * 0.85 and ww_thr < _MAX_WAKE_THRESHOLD:
                     # Raise by 8% above observed ambient level — avoid the large
                     # fixed +0.04 step that previously over-raised the threshold.
@@ -734,8 +736,9 @@ def _run_release_pipeline():
                 else:
                     log.warning(
                         f"⚠️  Ambient audio streak ({_ambient_clip_streak}). "
-                        f"threshold={ww_thr}, ambient RMS={rms:.3f}. Mute background audio or "
-                        f"set WAKE_WORD_VAD_THRESHOLD: {round(rms+0.04,2)} in config.json."
+                        f"threshold={ww_thr} (cap {_MAX_WAKE_THRESHOLD}), ambient RMS={rms:.3f}. "
+                        f"Mute background audio, or lower the microphone input level in "
+                        f"Windows Sound settings — ambient this loud usually means mic gain is high."
                     )
             widget.hide()
             if voice_act is not None:

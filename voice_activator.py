@@ -27,10 +27,18 @@ class VoiceActivator:
     # slow release so brief transients (keyboard, cough) don't sustain above it.
     _ATTACK_ALPHA  = 0.7
     _RELEASE_ALPHA = 0.15
-    # Hard ceiling for the sleep-mode wake gate, regardless of config/auto-raise.
-    # Above this a normal speaking voice can't reliably cross, so the wake word
-    # would never fire. Keep in sync with the auto-raise cap in main.py.
-    _WAKE_THRESHOLD_CEIL = 0.08
+    # Hard ceiling for the sleep-mode wake gate, regardless of config/auto-raise
+    # (fallback if the config constant is missing). Only a corrupt-config guard:
+    # the configured threshold is honored up to this value. It must sit above
+    # loud-room ambient (0.10–0.17 RMS on high-gain mics) — the old 0.08 ceiling
+    # silently discarded any higher configured value, so those setups false-
+    # triggered forever and no threshold change could stop it.
+    _WAKE_THRESHOLD_CEIL = 0.30
+    # Sleep-mode gate also floats above the measured ambient floor by this
+    # factor, so a loud environment stops false-triggering even when the
+    # configured threshold is low. Kept modest (1.5×) so a quiet voice over
+    # steady fan noise can still cross the raised gate.
+    _WAKE_NOISE_MULT = 1.5
     # Command-mode (Phase 2) gate adapts to the mic. A fixed 0.030 silenced quiet
     # mics mid-sentence: when a user's speaking voice sits below the gate, the tiny
     # gaps between words read as "done speaking". The effective gate is the noise
@@ -125,14 +133,17 @@ class VoiceActivator:
                 self._noise_floor += 0.002 * (raw_rms - self._noise_floor)
 
         if self._mode == "sleep":
-            # Clamp the wake gate to a safe band. The upper bound matters: a stale
-            # config.json or an over-eager auto-raise (see main.py Wake L1b) can push
-            # this above a normal speaking-voice level, which silently makes the wake
-            # word impossible to trigger — exactly the "it never caught anything"
-            # failure on low-gain mics. _WAKE_THRESHOLD_CEIL still rejects room tone
-            # but stays below spoken-phrase energy, so even a bad config self-heals.
+            # The wake gate is the HIGHEST of: the configured threshold, and the
+            # ambient floor × _WAKE_NOISE_MULT — so a loud room raises the gate
+            # automatically, and a user-raised config value is actually honored
+            # (the old fixed 0.08 ceiling silently clamped it, locking loud-room
+            # setups into permanent false triggering). The remaining ceiling is
+            # only a corrupt-config guard, high enough that any sane manual or
+            # auto-raised value passes through untouched.
             _cfg_thr    = getattr(config, "WAKE_WORD_VAD_THRESHOLD", config.VOICE_VAD_THRESHOLD)
-            threshold   = min(self._WAKE_THRESHOLD_CEIL, max(0.01, _cfg_thr))
+            _ceil       = getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", self._WAKE_THRESHOLD_CEIL)
+            _ambient    = self._noise_floor * self._WAKE_NOISE_MULT
+            threshold   = min(_ceil, max(0.01, _cfg_thr, _ambient))
             silence_sec = max(0.3,  getattr(config, "WAKE_WORD_SILENCE_SEC",   config.VOICE_VAD_SILENCE_SEC))
             max_rec_sec = max(1.0,  getattr(config, "WAKE_WORD_MAX_RECORD_SEC", 3.5))
         else:

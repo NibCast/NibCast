@@ -2412,7 +2412,9 @@ function startMicLevelPolling() {
         const bar = document.getElementById('micLevelBar');
         const val = document.getElementById('micLevelVal');
         if (!bar || !val) { stopMicLevelPolling(); return; }
-        const pct = Math.min(100, (d.rms / 0.15) * 100);
+        // Full-scale matches the threshold slider's max (WAKE_WORD_VAD_THRESHOLD_MAX)
+        // so the meter position lines up visually with the slider position.
+        const pct = Math.min(100, (d.rms / 0.30) * 100);
         bar.style.width = pct + '%';
         bar.style.background = d.above ? 'var(--vf-cyan)' : 'var(--vf-pri)';
         val.textContent = d.rms.toFixed(3);
