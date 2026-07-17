@@ -1284,7 +1284,7 @@
           <div style="display:flex;align-items:center;gap:12px">
             <!-- max must match config.WAKE_WORD_VAD_THRESHOLD_MAX — the engine clamps anything above it -->
             <input type="range" min="0.005" max="0.30" step="0.005" value="0.050" id="cfgVadThreshold" class="cfg-range" style="flex:1"
-              oninput="document.getElementById('cfgVadThresholdVal').textContent=parseFloat(this.value).toFixed(3);markUnsaved()">
+              oninput="document.getElementById('cfgVadThresholdVal').textContent=parseFloat(this.value).toFixed(3);onThresholdHandSet();markUnsaved()">
             <span id="cfgVadThresholdVal" style="font-size:12px;color:var(--vf-text);min-width:46px;text-align:right">0.050</span>
           </div>
           <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Lower = more sensitive. If background audio keeps triggering, raise it above the mic meter's idle level.</div>
@@ -1294,9 +1294,18 @@
               <div id="micLevelBar" style="height:100%;width:0%;background:var(--vf-pri);border-radius:3px;transition:width 0.1s"></div>
             </div>
             <span id="micLevelVal" style="font-size:10px;color:var(--vf-muted);min-width:42px;text-align:right">0.000</span>
-            <button class="btn-ghost" style="padding:2px 10px;font-size:9px;letter-spacing:1px" onclick="calibrateVad()">CALIBRATE</button>
+            <button id="calibBtn" class="btn-ghost" style="padding:2px 10px;font-size:9px;letter-spacing:1px" onclick="guidedCalibrate()">CALIBRATE</button>
           </div>
-          <div style="font-size:9px;color:var(--vf-muted);margin-top:3px">Speak your wake phrase → click CALIBRATE to auto-set threshold</div>
+          <!-- Guided calibration status: quiet phase countdown, then the sentence to read -->
+          <div id="calibStatus" style="display:none;margin-top:8px;padding:10px;background:var(--vf-bg-1);
+            border:1px solid var(--vf-b0);border-radius:6px;font-size:11px;color:var(--vf-text)"></div>
+          <div style="font-size:9px;color:var(--vf-muted);margin-top:3px">Click CALIBRATE for a guided setup: stay quiet, then read a sentence — the threshold is measured and saved automatically</div>
+          <!-- Ambient auto-raise opt-in/out -->
+          <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:10px;color:var(--vf-muted);cursor:pointer">
+            <input type="checkbox" id="cfgAutoRaise" checked onchange="markUnsaved()">
+            Auto-raise threshold when background noise keeps triggering
+            <span style="font-size:9px">(turns off automatically when you set the threshold yourself)</span>
+          </label>
         </div>
       </div>
       <!-- Legacy hidden input kept so loadConfig/saveConfig still work -->

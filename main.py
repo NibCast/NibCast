@@ -1,7 +1,7 @@
 # ============================================================
 #  NibCast — Main Entry Point
 # ============================================================
-__version__ = "2.4.1"
+__version__ = "2.4.2"
 
 import sys
 
@@ -757,7 +757,19 @@ def _run_release_pipeline():
                 # never cleared on those clips, so the raise never happened and
                 # the peaks kept triggering forever.
                 peak = _wav_peak_rms(wav_bytes)
-                if peak > ww_thr and ww_thr < _MAX_WAKE_THRESHOLD:
+                # A manually set threshold is the user's word — never overwrite
+                # it. The dashboard clears this flag on any hand-set/calibrated
+                # value; it stays True only while the threshold is app-managed.
+                _auto_raise = getattr(config, "WAKE_AUTO_RAISE_ENABLED", True)
+                if not _auto_raise:
+                    log.warning(
+                        f"⚠️  Ambient audio streak ({_ambient_clip_streak}), but "
+                        f"auto-raise is disabled (threshold set manually to {ww_thr}). "
+                        f"Leaving it alone. If false triggers persist, raise the "
+                        f"threshold or re-run Calibrate in Config → Wake Word "
+                        f"(ambient avg {rms:.3f} / peak {peak:.3f} RMS)."
+                    )
+                elif peak > ww_thr and ww_thr < _MAX_WAKE_THRESHOLD:
                     # Just above the peak that crossed the gate — enough to stop
                     # this source, without jumping straight to the cap.
                     new_thr = min(round(peak * 1.02, 2), _MAX_WAKE_THRESHOLD)

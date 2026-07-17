@@ -87,6 +87,28 @@ const FONTS_DISPLAY = {
   'mono':      "var(--vf-font-b)",
 };
 
+// ── Stale-process detector ──────────────────────────────────
+// If the code on disk is newer than the running app (update applied without a
+// restart), the page gets fresh JS but the Python routes stay old — features
+// break in confusing ways. Show a persistent banner instead of letting the
+// user discover it one cryptic error at a time.
+function checkAppVersion() {
+  fetch('/api/app-version').then(r => r.json()).then(d => {
+    if (!d.stale) return;
+    let b = document.getElementById('staleBanner');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'staleBanner';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;' +
+        'background:var(--vf-pri);color:#000;font-size:12px;padding:8px 16px;' +
+        'text-align:center;letter-spacing:0.5px';
+      document.body.appendChild(b);
+    }
+    b.textContent = `NibCast was updated (v${d.on_disk} on disk) but the running app is still v${d.running} — ` +
+                    `quit NibCast from the tray icon and start it again to finish the update.`;
+  }).catch(() => {});   // old app without this endpoint → no banner, no noise
+}
+
 // ── Init ────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
   restoreAppearance();
@@ -94,6 +116,8 @@ window.addEventListener('DOMContentLoaded', () => {
   renderHotkeyBuilder();
   refreshAll();
   loadDevices();
+  checkAppVersion();
+  setInterval(checkAppVersion, 5 * 60 * 1000);
   checkSetupStatus();
   setInterval(refreshAll, 30000);
 });
@@ -910,6 +934,10 @@ function loadConfig() {
         if (wt) wt.value = d.WAKE_WORD_VAD_THRESHOLD;
         if (wv) wv.textContent = parseFloat(d.WAKE_WORD_VAD_THRESHOLD).toFixed(3);
       }
+      if (d.WAKE_AUTO_RAISE_ENABLED !== undefined) {
+        const ar = document.getElementById('cfgAutoRaise');
+        if (ar) ar.checked = !!d.WAKE_AUTO_RAISE_ENABLED;
+      }
       if (d.WAKE_WORD_SILENCE_SEC !== undefined) {
         const el = document.getElementById('cfgWakeSilenceSec');
         const lbl = document.getElementById('cfgWakeSilenceSecVal');
@@ -1282,6 +1310,8 @@ function saveConfig() {
                || '');
   const _wwThr = document.getElementById('cfgVadThreshold');
   if (_wwThr) cfg.WAKE_WORD_VAD_THRESHOLD = parseFloat(_wwThr.value);
+  const _autoRaise = document.getElementById('cfgAutoRaise');
+  if (_autoRaise) cfg.WAKE_AUTO_RAISE_ENABLED = _autoRaise.checked;
   cfg.WAKE_WORD_SILENCE_SEC    = parseFloat(document.getElementById('cfgWakeSilenceSec')?.value || '0.55');
   cfg.WAKE_WORD_TRIGGER_SEC    = parseFloat(document.getElementById('cfgWakeTriggerSec')?.value || '0.15');
   cfg.WAKE_WORD_MAX_RECORD_SEC = parseFloat(document.getElementById('cfgWakeMaxRecordSec')?.value || '2.5');
@@ -2419,7 +2449,9 @@ function startMicLevelPolling() {
         bar.style.background = d.above ? 'var(--vf-cyan)' : 'var(--vf-pri)';
         val.textContent = d.rms.toFixed(3);
       })
-      .catch(() => stopMicLevelPolling());
+      // Skip the tick on a transient failure — don't kill the meter for good
+      // (one dropped request used to permanently blank the level bar).
+      .catch(() => {});
   }, 100);
 }
 
@@ -2437,22 +2469,111 @@ function updateMicLevelPolling() {
   }
 }
 
-function calibrateVad() {
-  fetch('/api/calibrate-vad', { method: 'POST' })
-    .then(r => r.json())
-    .then(d => {
-      if (d.ok) {
-        const tl = document.getElementById('cfgVadThreshold');
-        const tv = document.getElementById('cfgVadThresholdVal');
-        if (tl) tl.value = d.threshold;
-        if (tv) tv.textContent = d.threshold.toFixed(3);
-        markUnsaved();
-        showToast(`VAD THRESHOLD → ${d.threshold.toFixed(3)} (voice RMS ${d.voice_rms})`);
-      } else {
-        showToast('CALIBRATE: ' + (d.error || 'FAILED'));
-      }
-    })
-    .catch(() => showToast('CALIBRATE FAILED'));
+// Dragging the threshold slider is an explicit user choice — turn off the
+// ambient auto-raise so the app never silently overwrites the hand-set value.
+// (The server enforces the same rule; this keeps the checkbox honest.)
+let _autoRaiseToastShown = false;
+function onThresholdHandSet() {
+  const ar = document.getElementById('cfgAutoRaise');
+  if (ar && ar.checked) {
+    ar.checked = false;
+    if (!_autoRaiseToastShown) {
+      _autoRaiseToastShown = true;
+      showToast('AUTO-RAISE OFF — your threshold will be respected');
+    }
+  }
+}
+
+// ── Guided VAD calibration ────────────────────────────────────
+// Phase 1: user stays quiet ~3s (ambient floor). Phase 2: user reads a
+// sentence ~6s (speech level). The SERVER samples its live mic level during
+// each phase (one blocking request per phase — rapid client-side polling
+// proved flaky inside the pywebview desktop window). The server then picks
+// a threshold between the two levels and saves it (auto-raise is disabled
+// server-side — calibrated = user-chosen).
+let _calibRunning = false;
+
+const _sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function _sampleMicServer(ms) {
+  const r = await fetch('/api/calibrate-vad/sample', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ms }),
+  });
+  let d;
+  try {
+    d = await r.json();
+  } catch (e) {
+    // HTML instead of JSON = the running app predates this endpoint (its 404
+    // page is HTML). The page always gets fresh JS from disk, but routes only
+    // update when the Python process restarts — tell the user exactly that.
+    throw new Error('The running NibCast app is older than this page — fully quit ' +
+                    'NibCast (tray icon → Quit) and start it again, then retry.');
+  }
+  if (!d.ok) throw new Error(d.error || 'mic sampling failed');
+  return d.samples;
+}
+
+async function guidedCalibrate() {
+  if (_calibRunning) return;
+  _calibRunning = true;
+  const status = document.getElementById('calibStatus');
+  const btn    = document.getElementById('calibBtn');
+  if (btn) btn.disabled = true;
+  if (status) status.style.display = '';
+
+  const setStatus = html => { if (status) status.innerHTML = html; };
+  const wake = document.getElementById('cfgWakeWordInline')?.value?.trim()
+            || document.getElementById('cfgWakeWord')?.value?.trim()
+            || 'hey voice';
+  const sentence = `${wake}, take a note: the meeting moved to nine tomorrow morning.`;
+
+  try {
+    // Phase 1 — server samples for 3s while we run the countdown locally.
+    const p1 = _sampleMicServer(3000);
+    for (let s = 3; s >= 1; s--) {
+      setStatus(`<b>Step 1/2 — stay quiet.</b> Measuring background noise… ${s}`);
+      await _sleep(1000);
+    }
+    const ambient = await p1;
+
+    // Phase 2 — server samples for 6s while the user reads the sentence.
+    const p2 = _sampleMicServer(6000);
+    setStatus(`<b>Step 2/2 — read this out loud, at your normal dictation volume:</b><br>` +
+              `<span style="color:var(--vf-pri);font-size:13px">“${sentence}”</span>`);
+    const speech = await p2;
+
+    setStatus('Measuring…');
+    const r = await fetch('/api/calibrate-vad/guided', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ambient, speech }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      const tl = document.getElementById('cfgVadThreshold');
+      const tv = document.getElementById('cfgVadThresholdVal');
+      if (tl) tl.value = d.threshold;
+      if (tv) tv.textContent = d.threshold.toFixed(3);
+      const ar = document.getElementById('cfgAutoRaise');
+      if (ar) ar.checked = false;   // server disabled it; keep the UI honest
+      setStatus(`✓ Calibrated and saved. Threshold <b>${d.threshold.toFixed(3)}</b> ` +
+                `(background ${d.ambient_floor.toFixed(3)} · your voice ${d.speech_level.toFixed(3)}). ` +
+                `Auto-raise is now off — this value stays until you change it.`);
+      showToast(`THRESHOLD ${d.threshold.toFixed(3)} SAVED`);
+    } else {
+      setStatus(`✗ ${d.error || 'Calibration failed'}`);
+      showToast('CALIBRATE: ' + (d.error || 'FAILED'));
+    }
+  } catch (e) {
+    setStatus('✗ ' + (e && e.message ? e.message
+              : 'Calibration failed — is the app (not just the dashboard) running?'));
+    showToast('CALIBRATE FAILED');
+  } finally {
+    _calibRunning = false;
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ── Purge old history ─────────────────────────────────────────

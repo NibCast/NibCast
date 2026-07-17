@@ -179,6 +179,13 @@ WAKE_WORD_VAD_THRESHOLD  = 0.03   # tune down if wake phrase is missed; up if ba
 # false triggering that no config value could stop). Not persisted — a constant,
 # referenced by voice_activator.py, main.py, and web_dashboard.py.
 WAKE_WORD_VAD_THRESHOLD_MAX = 0.30
+# Allow the app to auto-raise WAKE_WORD_VAD_THRESHOLD when background audio
+# keeps triggering the wake gate (main.py Wake L1b). The dashboard flips this
+# OFF automatically the moment the user sets the threshold by hand (slider or
+# guided calibration) — an explicit user value must never be silently
+# overwritten. Re-enable from Config → Wake Word if you want the automatic
+# behavior back.
+WAKE_AUTO_RAISE_ENABLED  = True
 WAKE_WORD_SILENCE_SEC    = 0.70   # 0.55 chopped phrases with a mid-word pause ("hey…jarvis"); 0.70 holds the whole phrase
 WAKE_WORD_TRIGGER_SEC    = 0.15   # reduced from 0.25 → recording fires sooner on voice onset
 WAKE_WORD_MAX_RECORD_SEC = 3.0    # room for the full phrase + trailing silence at the larger silence window
@@ -318,6 +325,7 @@ _PERSISTED_KEYS = (
     "WAKE_WORD", "WAKE_WORD_ENABLED", "WAKE_WORD_LISTEN_SEC",
     "WAKE_WORD_FUZZY_THRESHOLD",
     "WAKE_WORD_VAD_THRESHOLD", "WAKE_WORD_SILENCE_SEC",
+    "WAKE_AUTO_RAISE_ENABLED",
     "WAKE_WORD_TRIGGER_SEC", "WAKE_WORD_MAX_RECORD_SEC",
     "WAKE_WORD_ALTERNATIVES",
     # Groq wake model

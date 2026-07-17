@@ -747,6 +747,47 @@ def api_backup():
     )
 
 
+def _app_version():
+    # Read the already-loaded main module's __version__ (single source of
+    # truth) without re-importing it and triggering its side effects.
+    for modname in ("main", "__main__"):
+        v = getattr(sys.modules.get(modname), "__version__", None)
+        if v:
+            return v
+    return "unknown"
+
+
+def _on_disk_version():
+    """__version__ as written in main.py on disk right now — differs from
+    _app_version() when the code was updated under a still-running process."""
+    import re as _re
+    try:
+        with open(os.path.join(_DIR, "main.py"), encoding="utf-8") as f:
+            for line in f:
+                m = _re.match(r'__version__\s*=\s*["\']([^"\']+)', line)
+                if m:
+                    return m.group(1)
+    except OSError:
+        pass
+    return "unknown"
+
+
+@app.route("/api/app-version")
+def api_app_version():
+    """Running vs on-disk app version. The dashboard uses this to warn when
+    the process is older than the code on disk (an update was applied without
+    restarting the app). In that state the page serves FRESH JS from disk while
+    the Python routes stay OLD — new page features hit missing endpoints and
+    fail in confusing ways (HTML 404s parsed as JSON, etc.). Surfacing
+    \"restart NibCast\" beats every user having to rediscover that."""
+    running, on_disk = _app_version(), _on_disk_version()
+    return jsonify({
+        "running": running,
+        "on_disk": on_disk,
+        "stale": "unknown" not in (running, on_disk) and running != on_disk,
+    })
+
+
 @app.route("/api/debug-bundle")
 def api_debug_bundle():
     """A SCRUBBED diagnostics bundle for bug reports: redacted config + system
@@ -755,15 +796,6 @@ def api_debug_bundle():
     import json as _json
     import platform as _plat
     import re as _re
-
-    def _app_version():
-        # Read the already-loaded main module's __version__ (single source of
-        # truth) without re-importing it and triggering its side effects.
-        for modname in ("main", "__main__"):
-            v = getattr(sys.modules.get(modname), "__version__", None)
-            if v:
-                return v
-        return "unknown"
 
     _SECRET_RE = _re.compile(r"(KEY|SECRET|TOKEN|PASSWORD|PIN)", _re.I)
 
@@ -943,6 +975,7 @@ def api_get_config():
         "WAKE_WORD":              getattr(config, "WAKE_WORD", ""),
         "WAKE_WORD_ENABLED":      getattr(config, "WAKE_WORD_ENABLED", False),
         "WAKE_WORD_VAD_THRESHOLD": getattr(config, "WAKE_WORD_VAD_THRESHOLD", 0.05),
+        "WAKE_AUTO_RAISE_ENABLED": getattr(config, "WAKE_AUTO_RAISE_ENABLED", True),
         "WAKE_WORD_SILENCE_SEC":    getattr(config, "WAKE_WORD_SILENCE_SEC", 0.55),
         "WAKE_WORD_TRIGGER_SEC":    getattr(config, "WAKE_WORD_TRIGGER_SEC", 0.15),
         "WAKE_WORD_MAX_RECORD_SEC": getattr(config, "WAKE_WORD_MAX_RECORD_SEC", 2.5),
@@ -1088,9 +1121,17 @@ def api_save_config():
         # would silently clamp away.
         try:
             _thr_max = getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", 0.30)
+            _old_thr = getattr(config, "WAKE_WORD_VAD_THRESHOLD", 0.03)
             config.WAKE_WORD_VAD_THRESHOLD = max(0.01, min(_thr_max, float(data["WAKE_WORD_VAD_THRESHOLD"])))
+            # A hand-moved slider is an explicit user choice — stop the ambient
+            # auto-raise from overwriting it. (An explicit WAKE_AUTO_RAISE_ENABLED
+            # in the same payload wins below, so re-enabling still works.)
+            if abs(config.WAKE_WORD_VAD_THRESHOLD - _old_thr) > 1e-6:
+                config.WAKE_AUTO_RAISE_ENABLED = False
         except (TypeError, ValueError):
             pass
+    if "WAKE_AUTO_RAISE_ENABLED" in data:
+        config.WAKE_AUTO_RAISE_ENABLED = bool(data["WAKE_AUTO_RAISE_ENABLED"])
     if "WAKE_WORD_SILENCE_SEC" in data:
         # Floor matches the engine clamp (voice_activator.py sleep branch uses
         # max(0.3, …)) so the saved value is always the effective value.
@@ -1716,15 +1757,110 @@ def api_enroll_clear():
 @app.route("/api/calibrate-vad", methods=["POST"])
 def api_calibrate_vad():
     """Set WAKE_WORD_VAD_THRESHOLD 20% below the current peak mic level.
-    Call this while speaking the wake phrase to auto-calibrate."""
+    Call this while speaking the wake phrase to auto-calibrate.
+    (Legacy single-shot endpoint — the dashboard now uses /api/calibrate-vad/guided.)"""
     rms = _mic_level
     if rms < 0.01:
         return jsonify({"ok": False, "error": "No audio detected — speak first"}), 400
     _thr_max = getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", 0.30)
     new_thr = round(min(_thr_max, max(0.01, rms * 0.80)), 3)
     config.WAKE_WORD_VAD_THRESHOLD = new_thr
+    config.WAKE_AUTO_RAISE_ENABLED = False   # calibrated = user-chosen; don't overwrite
     config.save()
     return jsonify({"ok": True, "threshold": new_thr, "voice_rms": round(rms, 4)})
+
+
+def _percentile(values, pct: float) -> float:
+    """Nearest-rank percentile of a list (no numpy dependency at request time)."""
+    vals = sorted(values)
+    if not vals:
+        return 0.0
+    idx = min(len(vals) - 1, max(0, int(round(pct / 100.0 * (len(vals) - 1)))))
+    return float(vals[idx])
+
+
+def _guided_threshold(ambient: list, speech: list):
+    """Compute a wake threshold from two mic-level sample sets.
+
+    ambient — RMS samples taken while the user stayed quiet.
+    speech  — RMS samples taken while the user read the calibration sentence.
+
+    Returns (threshold, stats_dict) or (None, error_string).
+
+    The gate compares a fast-attack EMA of block RMS against the threshold, so
+    the threshold must sit clearly ABOVE the ambient floor (or the gate fires
+    on room noise) and clearly BELOW typical speech level (or the wake phrase
+    can't cross it). Speech samples include inter-word gaps, so the 75th
+    percentile — not the peak — represents what the EMA sees while talking.
+    """
+    ambient = [float(v) for v in ambient if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.0]
+    speech  = [float(v) for v in speech  if isinstance(v, (int, float)) and 0.0 <= float(v) <= 1.0]
+    if len(ambient) < 5 or len(speech) < 10:
+        return None, "Not enough audio captured — try again"
+
+    ambient_floor = _percentile(ambient, 90)
+    speech_level  = _percentile(speech, 75)
+
+    if speech_level < 0.01:
+        return None, "No voice detected — read the sentence out loud during step 2"
+    if speech_level < ambient_floor * 1.4:
+        return None, (f"Your voice ({speech_level:.3f} RMS) is too close to the background "
+                      f"noise ({ambient_floor:.3f} RMS). Move somewhere quieter or closer "
+                      f"to the mic, then calibrate again.")
+
+    # Sit above the ambient floor with margin, but never above 65% of speech
+    # level — the wake phrase must clear the gate comfortably every time.
+    thr = max(ambient_floor * 1.4, speech_level * 0.45)
+    thr = min(thr, speech_level * 0.65)
+    _thr_max = getattr(config, "WAKE_WORD_VAD_THRESHOLD_MAX", 0.30)
+    thr = round(max(0.01, min(_thr_max, thr)), 3)
+    return thr, {"ambient_floor": round(ambient_floor, 4),
+                 "speech_level":  round(speech_level, 4)}
+
+
+@app.route("/api/calibrate-vad/sample", methods=["POST"])
+def api_calibrate_vad_sample():
+    """Sample the live mic level server-side for {ms} milliseconds and return
+    the samples. One blocking request per calibration phase — far more robust
+    than the page polling /api/mic-level every 100 ms (rapid-fire fetches
+    proved flaky inside the pywebview desktop window). Flask's dev server
+    runs threaded, so the block doesn't stall other requests."""
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        ms = int(data.get("ms", 3000))
+    except (TypeError, ValueError):
+        ms = 3000
+    ms = max(500, min(10000, ms))
+    samples = []
+    end = time.monotonic() + ms / 1000.0
+    while time.monotonic() < end:
+        samples.append(float(_mic_level))
+        time.sleep(0.05)
+    if all(v == 0.0 for v in samples):
+        return jsonify({"ok": False, "error":
+                        "Mic isn't being monitored — make sure the main NibCast app "
+                        "is running (not just the dashboard) and voice activation is on."}), 400
+    return jsonify({"ok": True, "samples": samples})
+
+
+@app.route("/api/calibrate-vad/guided", methods=["POST"])
+def api_calibrate_vad_guided():
+    """Guided calibration: the dashboard collects mic-level samples during a
+    quiet phase and a read-this-sentence phase, then posts both lists here.
+    Computes a threshold between the ambient floor and the user's speech level,
+    saves it, and disables the ambient auto-raise (a calibrated value is a
+    user-chosen value)."""
+    data = request.get_json(force=True, silent=True) or {}
+    thr, extra = _guided_threshold(data.get("ambient") or [], data.get("speech") or [])
+    if thr is None:
+        return jsonify({"ok": False, "error": extra}), 400
+    config.WAKE_WORD_VAD_THRESHOLD = thr
+    config.WAKE_AUTO_RAISE_ENABLED = False
+    config.save()
+    log.info(f"Guided calibration: threshold → {thr} "
+             f"(ambient {extra['ambient_floor']}, speech {extra['speech_level']}); "
+             f"auto-raise disabled")
+    return jsonify({"ok": True, "threshold": thr, **extra})
 
 
 _inject_callback = None

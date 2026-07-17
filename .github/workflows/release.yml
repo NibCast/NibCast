@@ -46,32 +46,16 @@ jobs:
           Copy-Item dist\NibCast.exe "NibCast-$version.exe"
         shell: pwsh
 
+      # Release notes come from CHANGELOG.md — keep the version's section up to
+      # date there and the release fills itself in (no post-publish editing).
+      - name: Generate release notes from CHANGELOG.md
+        run: python .github/gen_release_notes.py "${{ github.ref_name }}"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: "NibCast ${{ github.ref_name }}"
-          body: |
-            ## What's New
-            <!-- Fill in release notes here, or use the GitHub UI to edit after publishing -->
-
-            ## Downloads
-
-            | File | Description |
-            |------|-------------|
-            | `NibCast-${{ github.ref_name }}.exe` | **Single file** — just double-click. Slower first launch (~5s). |
-            | `NibCast-${{ github.ref_name }}-windows.zip` | **Folder install** — extract and run `NibCast.exe`. Faster launch. |
-
-            ## First Run
-            1. Double-click `NibCast.exe`
-            2. Windows will show a SmartScreen warning → click **More info → Run anyway**
-            3. A setup wizard opens automatically — get a free Groq key at [console.groq.com](https://console.groq.com) and paste it in
-            4. Press `Ctrl+Alt+V` and speak
-
-            ## Requirements
-            - Windows 10 / 11 (64-bit)
-            - Microphone
-            - Free [Groq API key](https://console.groq.com) (7,200 min/day free)
-
+          body_path: release_body.md
           draft: false
           prerelease: false
           files: |

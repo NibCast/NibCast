@@ -5,6 +5,36 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
+## [2.4.2] — 2026-07-16
+
+### Fixed
+- **The ambient auto-raise no longer overwrites a threshold you set yourself.**
+  Auto-raise judged clips by their loudest 100 ms window while the gate acts on
+  a smoothed level near the clip average — so on high-gain mics the raised value
+  (peak × 1.02, capped at 0.30) landed *above* the user's actual speaking level
+  and the wake word went deaf until the threshold was reset by hand… which the
+  next streak overwrote again. Setting the threshold from the dashboard (slider
+  or Calibrate) now flips the new `WAKE_AUTO_RAISE_ENABLED` flag off, and the
+  engine leaves a hand-set value alone (it logs advice instead). A checkbox
+  under the slider turns the automatic behavior back on.
+- **Mic-level meter no longer dies permanently on one dropped request** — a
+  single failed poll used to stop the meter until the page was reloaded.
+
+### Added
+- **Guided threshold calibration.** Config → Wake Word → CALIBRATE now walks
+  through two steps — stay quiet (ambient floor), then read a shown sentence at
+  normal dictation volume (speech level) — and saves a threshold measured
+  between the two. Sampling runs server-side (one request per phase; rapid
+  client-side polling proved unreliable inside the pywebview desktop window).
+  Refuses with a clear message when voice and background noise are too close
+  to separate. Replaces the single-shot peak-based Calibrate.
+- **Stale-process banner.** If the code on disk is newer than the running app
+  (an update was applied without restarting), the dashboard now shows a
+  persistent "quit NibCast and start it again" banner instead of letting new
+  page features fail against old routes with cryptic errors.
+
+---
+
 ## [2.4.1] — 2026-07-14
 
 ### Fixed
@@ -253,6 +283,29 @@ thresholds that were previously being silently clamped simply take effect now.
   reworking the Tkinter overlay's window flags, and packaging as `.app`/`.dmg`
   instead of `.exe`. Not scheduled for a near-term release; tracked as a
   potential future port. Contributions welcome.
+
+---
+
+## [2.4.0] — 2026-06-29
+
+### Added
+- **Native desktop window.** Frameless pywebview window (`desktop_app.py`)
+  with a custom titlebar (minimize / maximize / close) and a draggable brand
+  area; the lightweight Chrome `--app` launch keeps its own native titlebar.
+- **One-click scrubbed diagnostics bundle** (sidebar → Debug Bundle): redacted
+  config + system info + recent log for bug reports; API keys never included.
+- **Opt-in LLM failover backend** (`LLM_FALLBACK_BACKEND`): when the primary
+  LLM is rate-limited (429) or errors, retry cleanup with a chosen fallback
+  provider instead of dropping to basic cleanup; never silently switches
+  providers.
+
+### Changed
+- Dashboard depth (drop-shadow + top rim-light), cross-fade panel transitions,
+  hover accents, roomier spacing; original dot-grid texture kept.
+
+### Security
+- Session cookie hardened (`SameSite=Lax`, `HttpOnly`); server stays on
+  127.0.0.1.
 
 ---
 
