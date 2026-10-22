@@ -370,5 +370,49 @@ class RoundTwoTests(unittest.TestCase):
             self.assertTrue(p.flush(timeout=3.0), "queue drained despite a hung pause")
 
 
+class DatabaseConnectionTests(unittest.TestCase):
+    """CI (Windows): history DB connections were never closed, so the file
+    stayed locked and the temp folder couldn't be deleted (WinError 32)."""
+
+    def test_every_connection_is_closed(self):
+        import sqlite3
+        import tempfile
+        import database as db
+        opened = []
+        real_connect = sqlite3.connect
+
+        def tracking(*a, **kw):
+            c = real_connect(*a, **kw)
+            opened.append(c)
+            return c
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(db, "DB_PATH", os.path.join(d, "h.db")), \
+             mock.patch.object(db.sqlite3, "connect", side_effect=tracking):
+            db.init_db()
+            db.save_transcription("raw", "Clean.")
+            db._get_all_rows(5)
+            db.get_history(5)
+            self.assertGreaterEqual(len(opened), 4)
+            for c in opened:
+                with self.assertRaises(sqlite3.ProgrammingError):
+                    c.execute("SELECT 1")          # closed connections refuse queries
+
+    def test_error_rolls_back_and_still_closes(self):
+        import sqlite3
+        import tempfile
+        import database as db
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(db, "DB_PATH", os.path.join(d, "h.db")):
+            db.init_db()
+            holder = []
+            with self.assertRaises(RuntimeError):
+                with db._conn() as c:
+                    holder.append(c)
+                    c.execute("INSERT INTO transcriptions (raw_text, clean_text) VALUES ('a','b')")
+                    raise RuntimeError("boom")
+            with self.assertRaises(sqlite3.ProgrammingError):
+                holder[0].execute("SELECT 1")
+            self.assertEqual(db._get_all_rows(5), [])   # the insert was rolled back
+
+
 if __name__ == "__main__":
     unittest.main()

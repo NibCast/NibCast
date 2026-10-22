@@ -7,6 +7,7 @@ import sqlite3
 import csv
 import io
 from collections import Counter
+from contextlib import contextmanager
 
 from config import USER_DIR
 from logger import log
@@ -15,11 +16,20 @@ DB_PATH = os.path.join(USER_DIR, "history.db")
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
 
+@contextmanager
 def _conn():
+    """`with _conn() as db:` — commits on success, rolls back on error, and
+    always CLOSES the connection. sqlite3's own `with connection:` only
+    commits; it leaves the connection (and on Windows the file lock) open, so
+    every history read/write used to leak one."""
     c = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=10)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA journal_mode=WAL")   # allows concurrent reads during writes
-    return c
+    try:
+        c.row_factory = sqlite3.Row
+        c.execute("PRAGMA journal_mode=WAL")   # allows concurrent reads during writes
+        with c:
+            yield c
+    finally:
+        c.close()
 
 
 SCHEMA_VERSION = 3

@@ -8,6 +8,7 @@
 import io
 import os
 import re
+from contextlib import closing
 import sys
 import time
 import threading
@@ -758,8 +759,10 @@ def api_backup():
                         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
                         os.close(tmp_fd)
                         try:
-                            with sqlite3.connect(full, check_same_thread=False) as src_conn, \
-                                 sqlite3.connect(tmp_path) as dst_conn:
+                            # closing(): sqlite3's own `with` only commits — the
+                            # handles must be closed or Windows can't delete tmp_path.
+                            with closing(sqlite3.connect(full, check_same_thread=False)) as src_conn, \
+                                 closing(sqlite3.connect(tmp_path)) as dst_conn:
                                 src_conn.backup(dst_conn)
                             zf.write(tmp_path, arcname=rel)
                         finally:
