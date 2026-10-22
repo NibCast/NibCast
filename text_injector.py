@@ -16,7 +16,7 @@ import pyperclip
 import pyautogui
 
 import config
-from logger import log
+from logger import log, redact
 
 # Optional fallback typist
 try:
@@ -76,7 +76,7 @@ class TextInjector:
         if config.APPEND_NEWLINE:
             text += "\n"
 
-        log.info(f"📋 Injecting: {text!r}")
+        log.info(f"📋 Injecting: {redact(text)}")
 
         prev = None
         if config.PRESERVE_CLIPBOARD:

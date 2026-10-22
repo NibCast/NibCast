@@ -5,6 +5,221 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
+## [2.7.0] — 2026-10-22
+
+### Added
+- **Local wake-word engine.** Config → Wake Word → *Local keyword spotter*
+  listens for your typed phrase on this PC with a tiny streaming model
+  (sherpa-onnx, ~17 MB, one-time download, no training). Instant, works
+  offline, and nothing is recorded or uploaded until you say the phrase — the
+  old engine recorded every noise and asked the speech recogniser. Sensitivity
+  slider (strict ↔ eager). Needs `pip install sherpa-onnx sentencepiece`.
+- **Live text while you speak.** A caption above the widget shows what NibCast
+  is hearing, refreshed every second with In-app Whisper (free, private), or
+  — opt-in — every 2.5 s with your cloud ASR on a short tail window. Display
+  only; the pasted text still comes from the full transcription.
+- **Pause music while dictating.** Spotify/YouTube/VLC… are paused when you
+  start (or when the wake word opens the command window) and exactly those
+  players resume afterwards. Uses Windows media sessions, so it never starts
+  a player that wasn't playing. Needs `pip install winsdk`.
+- **Screen context (optional, off by default).** Reads names and terms from the
+  active window — its title, plus visible text via Windows' built-in on-device
+  OCR — and uses them to spell what you say correctly (never to insert words
+  you didn't say). The screenshot never leaves the PC and isn't saved.
+
+### Changed
+- **Hybrid cleanup is its own opt-in** (`LLM_HYBRID`, set by the HYBRID CLEANUP
+  picker or AS HYBRID). It no longer turns on with Brain Mode, which only
+  doubles up *transcription* — so adding a local cleanup model can't start
+  uploading audio to a second cloud ASR. Existing setups keep their behaviour.
+- AI Prompt detection runs after chat/email/notes, so "RE: Gemini launch –
+  Outlook" stays an email; Gmail in a browser is now formatted as email.
+
+### Fixed (from code + security review)
+- **Offline Mode didn't cover Anthropic** — cleanup, hybrid and command mode
+  could still reach api.anthropic.com. Every LLM entry point now checks it.
+- Repeated proper names ("Bora Bora", "New York, New York") were collapsed
+  as stutters; ".NET" lost its dot and "UM" (an acronym) was deleted.
+- Spoken-list formatting no longer turns ordinary prose ("the first quarter
+  was good, the second…") into a broken list; stretched fillers ("uuh",
+  "errm") are removed again.
+- Hybrid: failure reasons (rate-limited, timeout) are recorded instead of
+  "empty"; neither engine streams to the dashboard (the loser used to keep
+  streaming after the winner was pasted); the fallback LLM still runs if both
+  hybrid engines fail; the local model is re-warmed so it isn't cold.
+- Command-mode history rows record their own outcome.
+- Changing the In-app Whisper model/device takes effect on Save.
+- Local wake: the command right after the phrase ("hey nova send Bob the
+  report") is no longer cut off; double-tap Right Alt works on AltGr layouts.
+- Media pause/resume run in order with timeouts, so music is never left paused.
+- Debug bundle: multi-line dictations from older logs, wake-match details and
+  snippet expansions are scrubbed too; Privacy Mode redacts them in new logs.
+- Screen OCR works for windows on a second monitor.
+
+---
+
+## [2.6.0] — 2026-10-22
+
+Paste-ready text: dictation comes out grammatical and formatted the way you
+were speaking — lists as numbered lists, tabular details as tables — with
+cloud and local models working together.
+
+### Added
+- **Hybrid cloud + local.** Brain Mode is now *Hybrid*: run two engines at
+  once — e.g. Groq + a local model for cleanup, or Groq + In-app Whisper for
+  transcription — and keep the better result. New **HYBRID CLEANUP** picker
+  and an **AS HYBRID** button in DETECT LOCAL MODELS. The first usable answer
+  is taken after a short grace window (`BRAIN_GRACE_SEC`, 1.5 s), so a slower
+  local model never holds up a paste. History records which engine won
+  (`hybrid:<backend>`).
+- **Formatting by intent.** The cleanup prompt now turns spoken lists, steps
+  and "first… second…" / "one… two…" sequences into numbered lists, obeys
+  "bullet points" / "new line" / "new paragraph", and turns several items that
+  share the same details (plans with prices, days with tasks) into a
+  **Markdown table** — only in apps that render Markdown (Notion, Obsidian,
+  code editors, AI chats); elsewhere a numbered list with the details.
+- **AI Prompt mode.** ChatGPT, Claude, Gemini, Copilot, Perplexity and
+  DeepSeek windows (desktop or browser tab) are detected: your request is kept
+  in your own voice (never answered), every detail and constraint kept,
+  multi-part asks numbered.
+- **Email layout** — a greeting and sign-off you dictate go on their own lines
+  with the body in short paragraphs (never invented). **Chat** stays short and
+  casual and keeps @mentions.
+- **Numbered lists without the LLM.** Even when cleanup is skipped (offline,
+  rate-limited), "first … second … third …" and "number one … number two …"
+  become a numbered list, and pure disfluencies (um, uh, erm, hmm) are removed.
+
+### Changed
+- **Stronger, grammatical cleanup.** The Flow prompt now removes hedging
+  fillers ("kind of", "sort of", "like", "actually", "just" when used as
+  filler), padding sentences ("So yeah.", "That's it.", "Let me think."),
+  and fixes grammar fully (agreement, tense, articles, word order), with
+  worked examples so small local models follow it too.
+- Hybrid scoring prefers the candidate with no leftover stutters or
+  disfluencies, proper sentence capitalisation, and the list/table format the
+  speaker asked for; table pipes and list numbers no longer count as padding.
+
+### Fixed
+- Privacy Mode: the text-injection log line ("📋 Injecting: …") still contained
+  the dictated text; it is now redacted, and scrubbed from Debug Bundles.
+
+---
+
+## [2.5.0] — 2026-10-22
+
+Local-first: NibCast can now run with **no API keys and nothing leaving the
+PC**, and start dictating without awkward key chords.
+
+### Added
+- **In-app Whisper (fully offline speech-to-text).** New ASR backend
+  *In-app ★ Offline* runs faster-whisper inside NibCast — no server to start,
+  no key. Pick a model (`tiny.en` … `large-v3-turbo`), click
+  **DOWNLOAD / LOAD**; it downloads once to `~/.nibcast/models` and uses an
+  NVIDIA GPU automatically when present (int8 CPU otherwise). Because it's
+  local, **wake-word checks are private too** — Phase-1 clips are no longer
+  uploaded. Optional dependency: `pip install faster-whisper` (bundled into the
+  .exe when installed at build time).
+- **DETECT LOCAL MODELS.** Config → AI Backend finds Ollama, LM Studio,
+  llama.cpp server, Jan and LocalAI running on this PC, lists their chat
+  models (embedding/speech models filtered out, best cleanup model first) and
+  sets one as the primary cleanup engine or the **fallback** in one click. The
+  former "Ollama" backend is now **Local ★ Offline** and works with any of
+  them. The chosen model is warmed up at startup (and kept loaded for 30 min
+  on Ollama) so the first dictation doesn't wait for it to load.
+- **Offline Mode** — a hard guard: audio and text may only go to engines on
+  this machine; cloud backends are refused even if selected or set as
+  fallback.
+- **Mouse push-to-talk.** Hold a mouse thumb button (X1/X2) or the middle
+  button to talk, or set it to click-to-start/stop. On Windows the button's
+  normal action (browser Back/Forward) is suppressed while assigned.
+- **Double-tap to dictate.** Tap Right Ctrl, Right Alt/AltGr, Right Shift or
+  Caps Lock twice to start, twice again to paste. Shortcuts and typing never
+  trigger it — any other key during or between the taps cancels.
+- Mouse and double-tap triggers apply as soon as you save — no restart. The
+  global mouse hook only runs while a button is assigned.
+
+### Fixed
+- **Wake word on non-Groq ASR backends.** The Phase-1 wake check always sent
+  Groq's model name (`whisper-large-v3`) to whatever backend was selected, so
+  OpenAI and custom servers rejected every wake clip. The override now only
+  applies to Groq.
+
+---
+
+## [2.4.3] — 2026-10-22
+
+Driven by real daily-use history: many dictations were being pasted
+**without** LLM cleanup and nothing said so, and most wake-word triggers were
+discarded — many of them the wake phrase itself, misheard the same way every time.
+
+### Fixed
+- **Rate-limited cleanup is retried instead of silently skipped.** A 429 from
+  the LLM (e.g. Groq's free tokens-per-minute cap) used to fall straight
+  through to basic cleanup, pasting the raw transcript. NibCast now waits for
+  the server's `Retry-After` (up to 8 s) and retries, then tries your
+  `LLM_FALLBACK` backend, and only then falls back to basic cleanup.
+- **Skipped cleanups are now visible.** Every history row records how its text
+  was cleaned (`llm`, `fallback:<backend>`, `off`, or `basic:<reason>` —
+  rate_limited, timeout, connection, guard, …). The Log shows an amber
+  **UNCLEANED** badge on those rows, the log names the reason, and the Dev CSV
+  export has a new **LLM Status** column. (Database schema v3; migrates
+  automatically.)
+- **Doubled words and repeated phrases are removed even without the LLM.**
+  The old filter only caught a word repeated 3+ times, so "updated updated",
+  "I I" and "give me the, give me the" were pasted as-is. Two-word stutters,
+  comma-separated runs ("it's, it's, it's") and restarted 2–5-word phrases now
+  collapse, while intentional doubles ("had had", "very very") stay — even
+  before the LLM runs.
+- **The anti-chatbot guard no longer throws away correct cleanups** of
+  dictation that genuinely starts with "Here is…", "Based on…", "It looks
+  like…", "Sure, …". When the guard does fire, the fallback LLM is tried before
+  basic cleanup.
+- **Saying the wake phrase again during the command window re-arms it**
+  instead of pasting "Hey nova hey nova" into your document.
+- Whisper's foreign-language YouTube outros on background noise ("Hãy
+  subscribe cho kênh … để không bỏ lỡ những video hấp dẫn") are now treated as
+  hallucinations.
+- Run-at-startup registered `main.py` relative to the current directory (and a
+  bogus script path for the .exe); it now points at the real file.
+
+### Added
+- **Wake-word mishears are editable and learnable.** Config → Wake Phrase has
+  an **ALSO ACCEPT** list (`WAKE_WORD_ALTERNATIVES`, previously config.json
+  only) and a **SUGGEST FROM HISTORY** button that ranks the short transcripts
+  repeatedly discarded as "wake word not found" that sound like your phrase —
+  e.g. "hey nova" heard as *noba*, *nova* or *hey noba*. Click to
+  accept; nothing is added automatically.
+- **Cleanup prompt handles repeats, false starts and self-corrections**
+  ("If you… I was… I'm working on" → "I'm working on"; "Tuesday, no,
+  Wednesday" → "Wednesday"), fixes unmistakable in-context mishears ("mask
+  clicks" → "mouse clicks"), and knows more NibCast / Claude Code sound-alikes.
+- `tools/score_history.py` — read-only quality report over your history DB or
+  a Dev CSV export: leftover repeats/fillers/false starts, skipped cleanups,
+  dictionary near-misses, and log counts (429s, timeouts, wake hit rate).
+
+### Security & privacy
+- **Privacy Mode is now actually enforced.** It was saved and displayed but
+  never applied: transcripts were still stored in history and written to
+  `nibcast.log`. With it on, history keeps counts but no text (including
+  overheard wake-word clips), and every transcript-bearing log line is
+  replaced by a length placeholder.
+- **Debug Bundle scrubs dictated text from the log** it includes, regardless of
+  Privacy Mode, so older log lines can't leak into a bug report.
+- **Dashboard refuses requests from other sites.** Requests must use a
+  localhost Host header (blocks DNS rebinding), and POST/DELETE requests from
+  any other browser origin — including other localhost ports — are rejected.
+- **Backups no longer include login secrets** (`.vf_*`: PIN/pattern hashes,
+  TOTP seed, session key). After restoring a backup on a new machine, set your
+  PIN again.
+- Dashboard exports (`nibcast_*.csv/pdf`, backup and debug zips) are
+  git-ignored so personal history can't be committed by accident.
+
+**Tip:** set Config → AI Backend → `LLM_FALLBACK` to **Ollama** for a fully
+local safety net — had it been set, every rate-limited dictation in the
+history above would still have been cleaned.
+
+---
+
 ## [2.4.2] — 2026-07-16
 
 ### Fixed

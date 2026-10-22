@@ -37,7 +37,8 @@ def _load_wake_matcher():
     funcs = [n for n in tree.body
              if isinstance(n, ast.FunctionDef) and n.name in {"_jaro", "_match_wake_word"}]
     log = types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None)
-    ns = {"re": __import__("re"), "config": config, "log": log, "getattr": getattr}
+    ns = {"re": __import__("re"), "config": config, "log": log, "getattr": getattr,
+          "redact": repr}
     for f in funcs:
         exec(compile(ast.Module([f], []), "main.py", "exec"), ns)
     return ns["_match_wake_word"]

@@ -236,6 +236,7 @@
             <option value="">— Auto Detect —</option>
             <option value="terminal">Terminal</option>
             <option value="vscode">Code Editor</option>
+            <option value="ai">AI Prompt (ChatGPT, Claude…)</option>
             <option value="browser">Browser</option>
             <option value="chat">Chat / Messaging</option>
             <option value="email">Email</option>
@@ -288,6 +289,7 @@
         <option value="">ALL CATEGORIES</option>
         <option value="terminal">TERMINAL</option>
         <option value="vscode">VS CODE</option>
+        <option value="ai">AI PROMPT</option>
         <option value="browser">BROWSER</option>
         <option value="chat">CHAT</option>
         <option value="email">EMAIL</option>
@@ -478,6 +480,11 @@
         <div class="mc-name">💻 CODE EDITOR</div>
         <div class="mc-desc">No auto-punctuation or capitalization; filler words kept. For VS Code, Vim, Cursor, Sublime.</div>
       </div>
+      <div class="mode-card" data-cat="ai" onclick="setTargetOverride('ai')">
+        <span class="mc-active" style="display:none">● ACTIVE</span>
+        <div class="mc-name">🤖 AI PROMPT</div>
+        <div class="mc-desc">Your request kept in your voice, multi-part asks as numbered points, Markdown allowed. For ChatGPT, Claude, Gemini, Copilot.</div>
+      </div>
       <div class="mode-card" data-cat="browser" onclick="setTargetOverride('browser')">
         <span class="mc-active" style="display:none">● ACTIVE</span>
         <div class="mc-name">🌐 BROWSER</div>
@@ -491,7 +498,7 @@
       <div class="mode-card" data-cat="email" onclick="setTargetOverride('email')">
         <span class="mc-active" style="display:none">● ACTIVE</span>
         <div class="mc-name">📧 EMAIL</div>
-        <div class="mc-desc">Full punctuation and capitalization, professional tone. For Outlook, Gmail, Thunderbird.</div>
+        <div class="mc-desc">Greeting, short paragraphs and sign-off on their own lines; professional tone. For Outlook, Gmail, Thunderbird.</div>
       </div>
       <div class="mode-card" data-cat="notes" onclick="setTargetOverride('notes')">
         <span class="mc-active" style="display:none">● ACTIVE</span>
@@ -702,7 +709,8 @@
             <button class="backend-pill"         data-backend="deepgram" onclick="setAsrBackend('deepgram')">Deepgram ★ Best</button>
             <button class="backend-pill"         data-backend="openai"   onclick="setAsrBackend('openai')">OpenAI</button>
             <button class="backend-pill"         data-backend="nvidia"   onclick="setAsrBackend('nvidia')">NVIDIA</button>
-            <button class="backend-pill"         data-backend="local"    onclick="setAsrBackend('local')">Local</button>
+            <button class="backend-pill"         data-backend="faster_whisper" onclick="setAsrBackend('faster_whisper')">In-app ★ Offline</button>
+            <button class="backend-pill"         data-backend="local"    onclick="setAsrBackend('local')">Local server</button>
             <button class="backend-pill"         data-backend="custom"   onclick="setAsrBackend('custom')">Custom</button>
           </div>
           <div style="font-size:10px;color:var(--vf-muted);margin-top:6px;line-height:1.5">
@@ -818,6 +826,28 @@
           </div>
         </div>
       </div>
+      <!-- In-app Whisper (faster-whisper) -->
+      <div class="asr-faster_whisper-fields" style="display:none">
+        <div style="padding:6px 16px 8px;font-size:10px;line-height:1.7;color:var(--vf-muted)">
+          <span style="color:var(--vf-cyan)">★ Fully offline.</span> Whisper runs inside NibCast — no key, no server,
+          and your audio (including wake-word checks) never leaves this PC. Needs
+          <code style="color:var(--vf-pri)">pip install faster-whisper</code>; the model downloads once.
+          Uses your NVIDIA GPU automatically if you have one.
+        </div>
+        <div class="cfg-row">
+          <div class="cfg-key">MODEL</div>
+          <div class="cfg-val" style="display:flex;gap:8px;align-items:center">
+            <select class="cfg-select" id="cfgLocalWhisperModel" onchange="markUnsaved()" style="flex:1"></select>
+            <select class="cfg-select" id="cfgLocalWhisperDevice" onchange="markUnsaved()" style="width:auto">
+              <option value="auto">Auto (GPU if found)</option>
+              <option value="cpu">CPU</option>
+              <option value="cuda">NVIDIA GPU</option>
+            </select>
+            <button class="btn-ghost" onclick="loadLocalWhisper()" style="white-space:nowrap;padding:6px 12px;font-size:9px;letter-spacing:2px">DOWNLOAD / LOAD</button>
+          </div>
+        </div>
+        <div id="localWhisperStatus" style="padding:0 16px 10px;font-size:10px;color:var(--vf-muted)"></div>
+      </div>
       <!-- Local ASR -->
       <div class="asr-local-fields" style="display:none">
         <div class="cfg-row">
@@ -887,7 +917,7 @@
             <button class="backend-pill"         data-backend="cerebras" onclick="setLlmBackend('cerebras')">Cerebras ★ Free</button>
             <button class="backend-pill"         data-backend="gemini"   onclick="setLlmBackend('gemini')">Gemini ★ Free</button>
             <button class="backend-pill"         data-backend="openai"   onclick="setLlmBackend('openai')">OpenAI</button>
-            <button class="backend-pill"         data-backend="ollama"   onclick="setLlmBackend('ollama')">Ollama</button>
+            <button class="backend-pill"         data-backend="ollama"   onclick="setLlmBackend('ollama')">Local ★ Offline</button>
             <button class="backend-pill"         data-backend="anthropic" onclick="setLlmBackend('anthropic')">Anthropic</button>
             <button class="backend-pill"         data-backend="custom"   onclick="setLlmBackend('custom')">Custom</button>
           </div>
@@ -907,7 +937,7 @@
             <option value="cerebras">Cerebras ★ Free</option>
             <option value="gemini">Gemini ★ Free</option>
             <option value="openai">OpenAI</option>
-            <option value="ollama">Ollama (local)</option>
+            <option value="ollama">Local model (Ollama / LM Studio …) — offline</option>
             <option value="anthropic">Anthropic</option>
             <option value="custom">Custom</option>
           </select>
@@ -916,6 +946,27 @@
             or errors, NibCast retries cleanup with this provider instead of dropping to
             basic cleanup. Needs that provider's key set — pick a <b>different</b> one
             (e.g. primary Groq → fallback <b>Cerebras</b>).
+          </div>
+        </div>
+      </div>
+      <!-- Offline Mode: hard guard against any cloud call -->
+      <div class="cfg-row">
+        <div class="cfg-key">OFFLINE MODE</div>
+        <div class="cfg-val">
+          <label style="display:flex;align-items:center;gap:8px;font-size:10px;color:var(--vf-muted);cursor:pointer">
+            <input type="checkbox" id="cfgOfflineMode" onchange="markUnsaved()">
+            Never send audio or text to the internet — only In-app Whisper and local models are used
+          </label>
+        </div>
+      </div>
+      <!-- Local models: detect servers already running on this PC -->
+      <div class="cfg-row">
+        <div class="cfg-key">LOCAL MODELS</div>
+        <div class="cfg-val">
+          <button class="btn-ghost" onclick="detectLocalModels()" style="padding:6px 12px;font-size:9px;letter-spacing:2px">DETECT LOCAL MODELS</button>
+          <div id="localModelsResult" style="font-size:10px;margin-top:6px;line-height:1.8;color:var(--vf-muted)">
+            Runs cleanup on your own PC — no API key, nothing leaves the machine. Finds
+            Ollama, LM Studio, llama.cpp, Jan and LocalAI if they're running.
           </div>
         </div>
       </div>
@@ -1027,19 +1078,21 @@
       <!-- Ollama LLM -->
       <div class="llm-ollama-fields" style="display:none">
         <div class="cfg-row">
-          <div class="cfg-key">OLLAMA_BASE_URL</div>
+          <div class="cfg-key">LOCAL SERVER URL</div>
           <div class="cfg-val">
             <input class="cfg-in" id="cfgOllamaUrl" placeholder="http://localhost:11434/v1" oninput="markUnsaved()" spellcheck="false">
           </div>
         </div>
         <div class="cfg-row">
-          <div class="cfg-key">OLLAMA_LLM_MODEL</div>
+          <div class="cfg-key">LOCAL MODEL</div>
           <div class="cfg-val">
             <input class="cfg-in" id="cfgOllamaModel" placeholder="llama3.2" oninput="markUnsaved()" spellcheck="false">
           </div>
         </div>
         <div style="padding:8px 16px 12px;font-size:10px;color:var(--vf-muted)">
-          Start Ollama: <code style="color:var(--vf-pri)">ollama run llama3.2</code> — uses local GPU/CPU.
+          Any OpenAI-compatible local server works — Ollama (<code style="color:var(--vf-pri)">ollama pull qwen2.5:7b</code>),
+          LM Studio (Developer → Start Server), llama.cpp (<code style="color:var(--vf-pri)">llama-server -m model.gguf</code>) or Jan.
+          Use <b>DETECT LOCAL MODELS</b> above to fill these in. A 3–8B instruct model is plenty for cleanup.
         </div>
       </div>
       <!-- Anthropic LLM -->
@@ -1086,8 +1139,8 @@
           <div class="cfg-tog-wrap" id="togBrainMode" onclick="toggleCfg('BRAIN_MODE')" style="margin-bottom:8px">
             <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
             <div>
-              <span class="cfg-tog-lbl">Run 2 ASR engines in parallel — pick the better result</span>
-              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Highest accuracy. Slightly slower. Requires a 2nd configured backend.</div>
+              <span class="cfg-tog-lbl">Hybrid transcription — run 2 speech engines at once (e.g. cloud + In-app Whisper) and keep the better transcript</span>
+              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">The first good answer is used after a 1.5 s grace window, so a slower local engine never holds up a paste. Hybrid <b>cleanup</b> is set separately below.</div>
             </div>
           </div>
           <div style="margin:0 0 8px;padding:8px 10px;border:1px solid var(--vf-cyan);border-radius:4px;background:rgba(80,200,255,0.06);font-size:10px;color:var(--vf-text);line-height:1.5">
@@ -1100,10 +1153,31 @@
             <select class="cfg-select" id="cfgBrainSecondary" onchange="markUnsaved()" style="flex:1">
               <option value="deepgram">Deepgram nova-3 ★ best pairing (different engine)</option>
               <option value="openai">OpenAI Whisper</option>
+              <option value="faster_whisper">In-app Whisper (offline, private) ★ cloud + local hybrid</option>
               <option value="local">Local Whisper server (free, private)</option>
               <option value="groq">Groq Whisper (same engine — no gain)</option>
               <option value="custom">Custom</option>
             </select>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
+        <div class="cfg-key">HYBRID CLEANUP</div>
+        <div class="cfg-val">
+          <select class="cfg-select" id="cfgLlmBrainSecondary" onchange="markUnsaved()">
+            <option value="">Off — one cleanup engine</option>
+            <option value="ollama">Local model (offline) ★ cloud + local hybrid</option>
+            <option value="groq">Groq ★ Free</option>
+            <option value="cerebras">Cerebras ★ Free</option>
+            <option value="gemini">Gemini ★ Free</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="custom">Custom</option>
+          </select>
+          <div style="font-size:10px;color:var(--vf-muted);margin-top:4px;line-height:1.5">
+            When set, this second LLM cleans the same text in parallel with your main one, and NibCast
+            keeps the version with better grammar, no leftover fillers and complete formatting. Pick a
+            <b>different</b> engine from your main LLM — e.g. Groq + a local model.
           </div>
         </div>
       </div>
@@ -1257,9 +1331,95 @@
             <button class="btn-ghost" onclick="testWakePhrase()" style="white-space:nowrap;padding:6px 12px;font-size:9px;letter-spacing:2px">TEST</button>
           </div>
           <div id="wakeTestResult" style="font-size:10px;margin-top:5px;min-height:16px;line-height:1.5"></div>
+          <div style="font-size:10px;letter-spacing:1px;color:var(--vf-muted);margin:10px 0 6px">WAKE ENGINE</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select class="cfg-select" id="cfgWakeEngine" onchange="markUnsaved();refreshWakeEngine()" style="flex:1;min-width:220px">
+              <option value="kws">Local keyword spotter ★ instant, private, offline</option>
+              <option value="asr">Speech recognition (records a clip, asks your ASR)</option>
+            </select>
+            <button class="btn-ghost" id="btnWakeModel" onclick="downloadWakeModel()" style="white-space:nowrap;padding:6px 12px;font-size:9px;letter-spacing:2px">DOWNLOAD MODEL</button>
+          </div>
+          <div id="wakeEngineStatus" style="font-size:10px;margin-top:5px;min-height:14px;color:var(--vf-muted)"></div>
+          <div id="wakeKwsRow" style="display:flex;gap:8px;align-items:center;margin-top:6px;font-size:10px">
+            <span style="color:var(--vf-muted);min-width:70px">Sensitivity</span>
+            <span style="color:var(--vf-muted)">strict</span>
+            <input type="range" min="0" max="1" step="0.05" value="0.5" id="cfgWakeKwsSens" class="cfg-range" style="flex:1" oninput="markUnsaved()">
+            <span style="color:var(--vf-muted)">eager</span>
+          </div>
+          <div style="font-size:9px;color:var(--vf-muted);margin-top:4px;line-height:1.5">
+            The local spotter listens for your exact phrase on this PC (~17 MB model, needs
+            <code>pip install sherpa-onnx sentencepiece</code>). Nothing is recorded or uploaded until you
+            say it, and there's no cloud delay. Raise sensitivity if it misses you; lower it if TV wakes it.
+          </div>
+          <div style="font-size:10px;letter-spacing:1px;color:var(--vf-muted);margin:10px 0 6px">ALSO ACCEPT — HOW WHISPER MISHEARS IT (ONE PER LINE)</div>
+          <div style="display:flex;gap:8px;align-items:flex-start">
+            <textarea class="cfg-in" id="cfgWakeAlternatives" rows="3" placeholder="e.g. noba&#10;hey noba" oninput="markUnsaved()" spellcheck="false" style="flex:1;margin:0;font-size:10px;resize:vertical"></textarea>
+            <button class="btn-ghost" onclick="suggestWakeAlternatives()" title="Find mishears of your wake phrase that were discarded" style="white-space:nowrap;padding:6px 12px;font-size:9px;letter-spacing:2px">SUGGEST FROM HISTORY</button>
+          </div>
+          <div id="wakeAltSuggest" style="font-size:10px;margin-top:5px;min-height:16px;line-height:1.8"></div>
           <div id="wakePhraseHint" style="font-size:10px;color:var(--vf-muted);margin-top:4px;line-height:1.5">
             In Voice Activation mode, say this phrase to start recording. It will be stripped from the final text.<br>
             In Hold / Hands-free mode, enabling this acts as a filter — recordings must begin with this phrase.
+          </div>
+        </div>
+
+        <!-- Chord-free triggers: mouse button + double-tap -->
+        <div style="margin-top:10px;padding:10px 14px;border:1px solid var(--vf-b1);border-radius:6px;background:var(--vf-bg-1)">
+          <div style="font-size:10px;letter-spacing:1px;color:var(--vf-muted);margin-bottom:6px">EASIER TRIGGERS — NO KEY CHORDS</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px">
+            <span style="min-width:96px">Mouse button</span>
+            <select class="cfg-select" id="cfgMousePtt" onchange="markUnsaved()" style="width:auto;flex:1;min-width:160px">
+              <option value="">Off</option>
+              <option value="x1">Thumb button — back (X1)</option>
+              <option value="x2">Thumb button — forward (X2)</option>
+              <option value="middle">Middle button / wheel click</option>
+            </select>
+            <select class="cfg-select" id="cfgMousePttMode" onchange="markUnsaved()" style="width:auto">
+              <option value="hold">Hold to talk</option>
+              <option value="toggle">Click to start / stop</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px;margin-top:8px">
+            <span style="min-width:96px">Double-tap key</span>
+            <select class="cfg-select" id="cfgDoubleTap" onchange="markUnsaved()" style="width:auto;flex:1;min-width:160px">
+              <option value="">Off</option>
+              <option value="ctrl_r">Right Ctrl</option>
+              <option value="alt_r">Right Alt / AltGr</option>
+              <option value="shift_r">Right Shift</option>
+              <option value="caps_lock">Caps Lock</option>
+            </select>
+            <span style="color:var(--vf-muted)">tap twice to start, twice again to paste</span>
+          </div>
+          <div style="font-size:9px;color:var(--vf-muted);margin-top:6px;line-height:1.5">
+            Applies as soon as you save. The assigned mouse button stops doing its usual job (e.g. browser Back) while set.
+          </div>
+        </div>
+
+        <!-- Dictation extras -->
+        <div style="margin-top:10px;padding:10px 14px;border:1px solid var(--vf-b1);border-radius:6px;background:var(--vf-bg-1)">
+          <div style="font-size:10px;letter-spacing:1px;color:var(--vf-muted);margin-bottom:6px">WHILE YOU DICTATE</div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:10px">
+            <span style="min-width:96px">Live text</span>
+            <select class="cfg-select" id="cfgLivePreview" onchange="markUnsaved()" style="width:auto;flex:1;min-width:200px">
+              <option value="auto">On with In-app Whisper (free, private)</option>
+              <option value="cloud">On — also with cloud ASR (uses quota)</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:10px;cursor:pointer">
+            <input type="checkbox" id="cfgPauseMedia" onchange="markUnsaved()">
+            Pause music / video while dictating, resume after
+            <span id="extrasMediaNote" style="color:var(--vf-muted)"></span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:6px;font-size:10px;cursor:pointer">
+            <input type="checkbox" id="cfgScreenContext" onchange="markUnsaved()">
+            Screen context — spell names visible in the active window correctly
+            <span id="extrasOcrNote" style="color:var(--vf-muted)"></span>
+          </label>
+          <div style="font-size:9px;color:var(--vf-muted);margin-top:6px;line-height:1.5">
+            Screen context reads the active window's title and, with on-device Windows OCR, its visible text. The
+            image never leaves your PC and isn't saved; only a short list of names/terms is sent with your audio to
+            the speech/cleanup engines you already use (nothing leaves in Offline Mode).
           </div>
         </div>
 

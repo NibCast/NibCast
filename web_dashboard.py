@@ -7,6 +7,8 @@
 
 import io
 import os
+import re
+from contextlib import closing
 import sys
 import time
 import threading
@@ -103,6 +105,36 @@ def _client_ip() -> str:
     # Server binds to 127.0.0.1 only — never trust X-Forwarded-For; a local
     # process can forge it to bypass per-IP rate limits.
     return request.remote_addr or "127.0.0.1"
+
+
+# ────────────────────────────────────────────────────────────
+# Request-origin guard (runs before auth)
+# ────────────────────────────────────────────────────────────
+# Binding to 127.0.0.1 is not enough on its own:
+#  • DNS rebinding — a website can point its own domain at 127.0.0.1 and talk to
+#    this server as "same-origin". The browser then sends Host: evil.example:7171,
+#    so only accepting our own host names shuts that door (incl. the public
+#    /setup page, which would otherwise let a site set the PIN on a fresh install).
+#  • localhost CSRF — SameSite=Lax treats every localhost port as the same site,
+#    so a page served by any local dev server could POST here with the session
+#    cookie (e.g. /api/inject types into the focused window, /api/config could
+#    redirect dictation to another server). Browsers always send Origin on such
+#    requests; anything not from this dashboard is refused.
+_ALLOWED_HOSTS = frozenset(
+    f"{h}{p}" for h in ("localhost", "127.0.0.1", "[::1]") for p in ("", f":{DASHBOARD_PORT}")
+)
+_ALLOWED_ORIGINS = frozenset(f"http://{h}" for h in _ALLOWED_HOSTS if h.endswith(f":{DASHBOARD_PORT}"))
+
+
+@app.before_request
+def require_local_origin():
+    if (request.host or "").lower() not in _ALLOWED_HOSTS:
+        return jsonify({"error": "forbidden host"}), 403
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        origin = request.headers.get("Origin")
+        # No Origin = not a browser cross-site request (curl, the app itself).
+        if origin is not None and origin.lower() not in _ALLOWED_ORIGINS:
+            return jsonify({"error": "forbidden origin"}), 403
 
 
 # ────────────────────────────────────────────────────────────
@@ -707,6 +739,10 @@ def api_backup():
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _, files in os.walk(src):
             for f in files:
+                # .vf_* hold the PIN/pattern hashes, the TOTP seed, and the session
+                # signing key — anyone holding a backup could log in as you.
+                if f.startswith(".vf_"):
+                    continue
                 full = os.path.join(root, f)
                 rel  = os.path.relpath(full, start=src)
                 is_cfg = f.endswith(".json")
@@ -723,8 +759,10 @@ def api_backup():
                         tmp_fd, tmp_path = tempfile.mkstemp(suffix=".db")
                         os.close(tmp_fd)
                         try:
-                            with sqlite3.connect(full, check_same_thread=False) as src_conn, \
-                                 sqlite3.connect(tmp_path) as dst_conn:
+                            # closing(): sqlite3's own `with` only commits — the
+                            # handles must be closed or Windows can't delete tmp_path.
+                            with closing(sqlite3.connect(full, check_same_thread=False)) as src_conn, \
+                                 closing(sqlite3.connect(tmp_path)) as dst_conn:
                                 src_conn.backup(dst_conn)
                             zf.write(tmp_path, arcname=rel)
                         finally:
@@ -788,6 +826,45 @@ def api_app_version():
     })
 
 
+# Log lines that carry dictated text, and the prefix to keep from each. Logs
+# written before Privacy Mode was enforced (or with it off) still hold full
+# transcripts, so the bug-report bundle scrubs them regardless of the setting.
+_TRANSCRIPT_LOG_RE = re.compile(
+    r"(✅ \[[^\]]+\](?: streamed:)?|📝 Pasting:|📋 Injecting:|🎙️  Command instruction:|"
+    r"🔵 Command mode \[[^\]]+\]:|Command in same utterance:|ASR hallucination|"
+    r"Phase 2 ambient guard:|App vocab hint:|Undo last paste \(\d+ chars\):|"
+    r"Wake fuzzy 3a: first\+last exact|Wake fuzzy 3b: first exact \+ last Jaro=[\d.]+|"
+    r"Wake fuzzy 3c: avg Jaro=[\d.]+|📎 Snippet:|heard=)(.*)$"
+)
+
+
+_LOG_LINE_START = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+
+def _scrub_log(lines) -> str:
+    """Scrub a log tail. Older versions logged pasted text without repr(), so a
+    multi-line dictation continues on lines with no timestamp — those
+    continuation lines belong to the scrubbed entry and are dropped too."""
+    # Start as if inside an entry: the tail may begin mid-way through one, and
+    # those leading untimestamped lines can't be attributed safely.
+    out, in_text = [], True
+    for line in lines:
+        if _LOG_LINE_START.match(line):
+            in_text = bool(_TRANSCRIPT_LOG_RE.search(line))
+            out.append(_scrub_log_line(line))
+        elif not in_text:
+            out.append(line)          # e.g. a traceback after a normal line — keep it
+    return "".join(out)
+
+
+def _scrub_log_line(line: str) -> str:
+    m = _TRANSCRIPT_LOG_RE.search(line)
+    if not m or not m.group(2).strip():
+        return line
+    end = "\n" if line.endswith("\n") else ""
+    return line[:m.start(2)] + " <dictated text removed>" + end
+
+
 @app.route("/api/debug-bundle")
 def api_debug_bundle():
     """A SCRUBBED diagnostics bundle for bug reports: redacted config + system
@@ -849,7 +926,7 @@ def api_debug_bundle():
                         log_path = os.path.join(root, fn)
             if log_path:
                 with open(log_path, "r", encoding="utf-8", errors="replace") as f:
-                    zf.writestr("nibcast.log", "".join(f.readlines()[-3000:]))
+                    zf.writestr("nibcast.log", _scrub_log(f.readlines()[-3000:]))
         except Exception as e:
             zf.writestr("nibcast.log", f"// could not read log: {e}")
 
@@ -860,9 +937,8 @@ def api_debug_bundle():
             "  system_info.txt      - versions, OS, selected backends (no secrets)\n"
             "  config.redacted.json - your settings with every API key REDACTED\n"
             "  nibcast.log          - the last ~3000 log lines\n\n"
-            "API keys are never included. Before attaching this to a public issue,\n"
-            "skim nibcast.log in case it contains personal dictation text (enable\n"
-            "Privacy Mode to keep transcript text out of logs entirely).\n")
+            "API keys are never included, and dictated text is stripped from the\n"
+            "log lines that carry it. Skim the log anyway before posting publicly.\n")
 
     buf.seek(0)
     fname = f"nibcast_debug_{time.strftime('%Y%m%d_%H%M%S')}.zip"
@@ -913,6 +989,13 @@ def api_get_config():
         "HOTKEY_COMBOS":  list(config.HOTKEY_COMBOS),
         "HOTKEY_COMBO":   config.HOTKEY_COMBOS[0] if config.HOTKEY_COMBOS else "",
         "HOTKEY_CONFIGS": list(getattr(config, "HOTKEY_CONFIGS", [])),
+        "LIVE_PREVIEW":                getattr(config, "LIVE_PREVIEW", "auto"),
+        "PAUSE_MEDIA_WHILE_DICTATING": getattr(config, "PAUSE_MEDIA_WHILE_DICTATING", False),
+        "SCREEN_CONTEXT":              getattr(config, "SCREEN_CONTEXT", False),
+        "SCREEN_CONTEXT_OCR":          getattr(config, "SCREEN_CONTEXT_OCR", True),
+        "MOUSE_PTT_BUTTON": getattr(config, "MOUSE_PTT_BUTTON", ""),
+        "MOUSE_PTT_MODE":   getattr(config, "MOUSE_PTT_MODE", "hold"),
+        "DOUBLE_TAP_KEY":   getattr(config, "DOUBLE_TAP_KEY", ""),
         "HOLD_TO_TALK":   config.HOLD_TO_TALK,
         "ASR_MODEL":      config.ASR_MODEL,
         "LLM_MODEL":      config.LLM_MODEL,
@@ -943,6 +1026,7 @@ def api_get_config():
         "BRAIN_MODE":          getattr(config, "BRAIN_MODE", False),
         "ASR_BRAIN_SECONDARY": getattr(config, "ASR_BRAIN_SECONDARY", "openai"),
         "LLM_BRAIN_SECONDARY": getattr(config, "LLM_BRAIN_SECONDARY", ""),
+        "LLM_HYBRID":          getattr(config, "LLM_HYBRID", False),
         "OPENAI_API_KEY_MASKED": _mask_key(ok),
         "OPENAI_API_KEY_SET":    bool(ok),
         "OPENAI_ASR_MODEL": getattr(config, "OPENAI_ASR_MODEL", "whisper-1"),
@@ -958,6 +1042,9 @@ def api_get_config():
         "GEMINI_LLM_MODEL": getattr(config, "GEMINI_LLM_MODEL", "gemini-2.5-flash"),
         "OLLAMA_BASE_URL":  getattr(config, "OLLAMA_BASE_URL", "http://localhost:11434/v1"),
         "OLLAMA_LLM_MODEL": getattr(config, "OLLAMA_LLM_MODEL", "llama3.2"),
+        "LOCAL_WHISPER_MODEL":  getattr(config, "LOCAL_WHISPER_MODEL", "small.en"),
+        "LOCAL_WHISPER_DEVICE": getattr(config, "LOCAL_WHISPER_DEVICE", "auto"),
+        "OFFLINE_MODE":         getattr(config, "OFFLINE_MODE", False),
         "LOCAL_ASR_URL":   getattr(config, "LOCAL_ASR_URL", "http://localhost:8000/v1/audio/transcriptions"),
         "LOCAL_ASR_MODEL": getattr(config, "LOCAL_ASR_MODEL", "whisper-1"),
         "CUSTOM_API_KEY_MASKED": _mask_key(ck),
@@ -974,6 +1061,9 @@ def api_get_config():
         # Wake word
         "WAKE_WORD":              getattr(config, "WAKE_WORD", ""),
         "WAKE_WORD_ENABLED":      getattr(config, "WAKE_WORD_ENABLED", False),
+        "WAKE_WORD_ALTERNATIVES": list(getattr(config, "WAKE_WORD_ALTERNATIVES", []) or []),
+        "WAKE_ENGINE":            getattr(config, "WAKE_ENGINE", "asr"),
+        "WAKE_KWS_SENSITIVITY":   getattr(config, "WAKE_KWS_SENSITIVITY", 0.5),
         "WAKE_WORD_VAD_THRESHOLD": getattr(config, "WAKE_WORD_VAD_THRESHOLD", 0.05),
         "WAKE_AUTO_RAISE_ENABLED": getattr(config, "WAKE_AUTO_RAISE_ENABLED", True),
         "WAKE_WORD_SILENCE_SEC":    getattr(config, "WAKE_WORD_SILENCE_SEC", 0.55),
@@ -1005,6 +1095,26 @@ def api_save_config():
     data = request.get_json(force=True, silent=True) or {}
     if "NVIDIA_API_KEY" in data and (data["NVIDIA_API_KEY"] or "").strip():
         config.NVIDIA_API_KEY = data["NVIDIA_API_KEY"].strip()
+    if data.get("LIVE_PREVIEW") in ("auto", "cloud", "off"):
+        config.LIVE_PREVIEW = data["LIVE_PREVIEW"]
+    for k in ("PAUSE_MEDIA_WHILE_DICTATING", "SCREEN_CONTEXT", "SCREEN_CONTEXT_OCR"):
+        if k in data:
+            setattr(config, k, bool(data[k]))
+    _pointer_changed = False
+    if data.get("MOUSE_PTT_BUTTON", None) in ("", "x1", "x2", "middle"):
+        _pointer_changed |= data["MOUSE_PTT_BUTTON"] != getattr(config, "MOUSE_PTT_BUTTON", "")
+        config.MOUSE_PTT_BUTTON = data["MOUSE_PTT_BUTTON"]
+    if data.get("MOUSE_PTT_MODE", None) in ("hold", "toggle"):
+        _pointer_changed |= data["MOUSE_PTT_MODE"] != getattr(config, "MOUSE_PTT_MODE", "hold")
+        config.MOUSE_PTT_MODE = data["MOUSE_PTT_MODE"]
+    if data.get("DOUBLE_TAP_KEY", None) in ("", "ctrl_r", "alt_r", "shift_r", "caps_lock"):
+        config.DOUBLE_TAP_KEY = data["DOUBLE_TAP_KEY"]     # read live on every key event
+    if _pointer_changed:
+        try:
+            import hotkey_listener
+            hotkey_listener.refresh_pointer_triggers()
+        except Exception as e:
+            log.warning(f"Mouse trigger refresh failed: {e}")
     if "HOTKEY_CONFIGS" in data and isinstance(data["HOTKEY_CONFIGS"], list):
         configs = [
             {"combo": item["combo"].strip(), "mode": item.get("mode", "hold")}
@@ -1082,8 +1192,22 @@ def api_save_config():
     # has no audio/transcription endpoint (every request 404s). It stays valid
     # for LLM only. Reject the selection so users can't pick a backend that
     # cannot work.
-    if "ASR_BACKEND" in data and data["ASR_BACKEND"] in ("groq", "openai", "local", "custom", "deepgram"):
+    import local_asr
+    _lw_before = (getattr(config, "LOCAL_WHISPER_MODEL", ""), getattr(config, "LOCAL_WHISPER_DEVICE", ""))
+    if data.get("LOCAL_WHISPER_MODEL") in local_asr.MODELS:
+        config.LOCAL_WHISPER_MODEL = data["LOCAL_WHISPER_MODEL"]
+    if data.get("LOCAL_WHISPER_DEVICE") in ("auto", "cpu", "cuda"):
+        config.LOCAL_WHISPER_DEVICE = data["LOCAL_WHISPER_DEVICE"]
+    # A loaded model is swapped for the newly chosen one right away, not on restart.
+    if local_asr.is_loaded() and _lw_before != (config.LOCAL_WHISPER_MODEL, config.LOCAL_WHISPER_DEVICE):
+        local_asr.load_async()
+    if "ASR_BACKEND" in data and data["ASR_BACKEND"] in ("groq", "openai", "local", "custom", "deepgram", "faster_whisper"):
         config.ASR_BACKEND = data["ASR_BACKEND"]
+        if config.ASR_BACKEND == "faster_whisper":
+            import local_asr
+            local_asr.load_async()      # download/load now, not on the first dictation
+    if "OFFLINE_MODE" in data:
+        config.OFFLINE_MODE = bool(data["OFFLINE_MODE"])
     if "LLM_BACKEND" in data and data["LLM_BACKEND"] in ("groq", "cerebras", "gemini", "nvidia", "openai", "ollama", "anthropic", "custom"):
         config.LLM_BACKEND = data["LLM_BACKEND"]
     if "LLM_FALLBACK_BACKEND" in data and data["LLM_FALLBACK_BACKEND"] in ("", "groq", "cerebras", "gemini", "nvidia", "openai", "ollama", "anthropic", "custom"):
@@ -1106,6 +1230,9 @@ def api_save_config():
             setattr(config, k, data[k])
     if "BRAIN_MODE" in data:
         config.BRAIN_MODE = bool(data["BRAIN_MODE"])
+    if "LLM_BRAIN_SECONDARY" in data:
+        # The HYBRID CLEANUP picker is the opt-in: "Off" clears it.
+        config.LLM_HYBRID = bool(data["LLM_BRAIN_SECONDARY"])
 
     # Wake word
     _wake_changed = False
@@ -1115,6 +1242,29 @@ def api_save_config():
     if "WAKE_WORD_ENABLED" in data:
         config.WAKE_WORD_ENABLED = bool(data["WAKE_WORD_ENABLED"])
         _wake_changed = True
+    if data.get("WAKE_ENGINE") in ("asr", "kws"):
+        _wake_changed |= data["WAKE_ENGINE"] != getattr(config, "WAKE_ENGINE", "asr")
+        config.WAKE_ENGINE = data["WAKE_ENGINE"]
+    if "WAKE_KWS_SENSITIVITY" in data:
+        try:
+            v = min(1.0, max(0.0, float(data["WAKE_KWS_SENSITIVITY"])))
+            _wake_changed |= v != getattr(config, "WAKE_KWS_SENSITIVITY", 0.5)
+            config.WAKE_KWS_SENSITIVITY = v
+        except (TypeError, ValueError):
+            pass
+    if "WAKE_WORD_ALTERNATIVES" in data:
+        alts = data["WAKE_WORD_ALTERNATIVES"]
+        if isinstance(alts, str):
+            alts = alts.replace(",", "\n").splitlines()
+        if isinstance(alts, list):
+            seen, clean = set(), []
+            for a in alts:
+                a = " ".join(str(a).lower().split())[:40]
+                if a and a not in seen:
+                    seen.add(a)
+                    clean.append(a)
+            config.WAKE_WORD_ALTERNATIVES = clean[:20]
+            _wake_changed = True
     if "WAKE_WORD_VAD_THRESHOLD" in data:
         # Clamp to the same ceiling the VAD engine enforces, so the saved value
         # is always the effective value — never persist a threshold the engine
@@ -1251,6 +1401,109 @@ def api_test_wake_phrase():
         "via_alt":    alts_matched[0] if alts_matched else None,
         "message":    "✅ Would trigger wake word" if matched else "❌ Would NOT trigger — try saying it differently",
     })
+
+
+@app.route("/api/extras-status")
+def api_extras_status():
+    """Which optional helpers are installed, so the UI can say what's missing."""
+    import local_asr, media_control, screen_context
+    return jsonify({"ok": True,
+                    "media_control": media_control.available(),
+                    "screen_ocr": screen_context.ocr_available(),
+                    "local_whisper_loaded": local_asr.is_loaded(),
+                    "windows": sys.platform == "win32"})
+
+
+@app.route("/api/wake-engine", methods=["GET", "POST"])
+def api_wake_engine():
+    """Local keyword-spotter status; POST downloads the model (once)."""
+    import wake_engine
+    if request.method == "POST":
+        wake_engine.download_async()
+    return jsonify({"ok": True, **wake_engine.status(),
+                    "engine": getattr(config, "WAKE_ENGINE", "asr")})
+
+
+@app.route("/api/local-asr", methods=["GET", "POST"])
+def api_local_asr():
+    """In-app Whisper status; POST starts the (first-time: download +) load."""
+    import local_asr
+    if request.method == "POST":
+        data = request.get_json(force=True, silent=True) or {}
+        model = data.get("model", "")
+        if model and model not in local_asr.MODELS:
+            return jsonify({"ok": False, "error": "unknown model"}), 400
+        if model:
+            config.LOCAL_WHISPER_MODEL = model
+            config.save()
+        local_asr.load_async(model)
+    return jsonify({"ok": True, **local_asr.status(), "models": local_asr.MODELS})
+
+
+@app.route("/api/local-models")
+def api_local_models():
+    """LLM servers running on this machine (Ollama, LM Studio, llama.cpp, Jan,
+    LocalAI) and their chat models — for one-click offline cleanup."""
+    import local_models
+    servers = local_models.detect()
+    return jsonify({"ok": True, "servers": servers,
+                    "current": {"backend": getattr(config, "LLM_BACKEND", ""),
+                                "fallback": getattr(config, "LLM_FALLBACK_BACKEND", ""),
+                                "base_url": getattr(config, "OLLAMA_BASE_URL", ""),
+                                "model": getattr(config, "OLLAMA_LLM_MODEL", "")}})
+
+
+@app.route("/api/local-models/use", methods=["POST"])
+def api_local_models_use():
+    """Point the local ("ollama") backend at a detected server + model and make
+    it the primary cleanup engine or the fallback. Loopback URLs only — this
+    control exists to keep text on the machine."""
+    import local_models
+    from transcriber import is_loopback_url
+    data = request.get_json(force=True, silent=True) or {}
+    base_url = str(data.get("base_url", "")).strip().rstrip("/")
+    model    = str(data.get("model", "")).strip()
+    role     = data.get("role", "primary")
+    host_ok  = base_url.startswith("http://") and is_loopback_url(base_url)
+    if not host_ok or not model or role not in ("primary", "fallback", "hybrid"):
+        return jsonify({"ok": False, "error": "need a local http:// server URL, a model, and role"}), 400
+    config.OLLAMA_BASE_URL  = base_url
+    config.OLLAMA_LLM_MODEL = model
+    if role == "primary":
+        config.LLM_BACKEND = "ollama"
+        if getattr(config, "LLM_FALLBACK_BACKEND", "") == "ollama":
+            config.LLM_FALLBACK_BACKEND = ""
+    elif role == "fallback":
+        config.LLM_FALLBACK_BACKEND = "ollama"
+    else:
+        # Hybrid: keep the cloud primary and clean every dictation with the local
+        # model in parallel, keeping the better result. Deliberately NOT
+        # BRAIN_MODE — that doubles transcription and would start uploading
+        # audio to a second cloud ASR.
+        config.LLM_BRAIN_SECONDARY = "ollama"
+        config.LLM_HYBRID = True
+    config.save()
+    local_models.warm_up_async(base_url, model)
+    log.info(f"🏠 Local LLM set as {role}: {model} @ {base_url}")
+    return jsonify({"ok": True, "role": role, "base_url": base_url, "model": model})
+
+
+@app.route("/api/wake-alternatives/suggest")
+def api_suggest_wake_alternatives():
+    """Mishears of the wake phrase that keep getting discarded, ranked from the
+    history (e.g. "hey nova" heard as "noba" again and again). The user picks which to
+    accept as WAKE_WORD_ALTERNATIVES; nothing is added automatically."""
+    wake_word = (getattr(config, "WAKE_WORD", "") or "").strip()
+    if not wake_word:
+        return jsonify({"ok": False, "error": "No wake phrase configured"})
+    existing = list(getattr(config, "WAKE_WORD_ALTERNATIVES", []) or [])
+    suggestions = db.suggest_wake_alternatives(wake_word, existing=existing)
+    # Drop anything the live matcher already accepts (fuzzy rules may cover it).
+    _match = getattr(sys.modules.get("__main__"), "_match_wake_word", None)
+    if _match is not None:
+        suggestions = [s for s in suggestions if not _match(s["text"], wake_word)[0]]
+    return jsonify({"ok": True, "wake_word": wake_word, "suggestions": suggestions,
+                    "privacy_mode": bool(getattr(config, "PRIVACY_MODE", False))})
 
 
 @app.route("/api/test-wake-phrase", methods=["POST"])
@@ -1433,6 +1686,14 @@ def api_transcribe_test():
         model = getattr(config, "CUSTOM_ASR_MODEL", "")
         if not url:
             return jsonify({"ok": False, "error": "CUSTOM_ASR_URL not set"})
+    elif backend == "faster_whisper":
+        import local_asr
+        if not local_asr.available():
+            return jsonify({"ok": False, "error": "Local Whisper isn't installed — run:  pip install faster-whisper"})
+        if not local_asr.load():
+            return jsonify({"ok": False, "error": "Local Whisper failed to load: " + local_asr.status()["error"]})
+        st = local_asr.status()
+        return jsonify({"ok": True, "message": f"Local Whisper ready ({st['model']} on {st['device']})"})
     elif backend == "nvidia":
         # NVIDIA has no audio/transcription endpoint — every request 404s.
         return jsonify({"ok": False, "error": "NVIDIA does not support transcription (ASR). "
@@ -1607,7 +1868,13 @@ def api_autostart():
         key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE)
         if enable:
             flags    = " --minimized" if minimized else ""
-            app_path = f'"{sys.executable}" "{os.path.abspath("main.py")}"{flags}'
+            # Frozen .exe launches itself; from source, run THIS checkout's
+            # main.py (the old abspath("main.py") resolved against whatever the
+            # current directory happened to be).
+            if getattr(sys, "frozen", False):
+                app_path = f'"{sys.executable}"{flags}'
+            else:
+                app_path = f'"{sys.executable}" "{os.path.join(_DIR, "main.py")}"{flags}'
             winreg.SetValueEx(key, app_name, 0, winreg.REG_SZ, app_path)
         else:
             try: winreg.DeleteValue(key, app_name)

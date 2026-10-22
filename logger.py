@@ -24,3 +24,16 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("NibCast")
+
+
+def redact(text) -> str:
+    """Transcript text for a log line, or a placeholder when Privacy Mode is on.
+    Use for every log message that would otherwise contain dictated words."""
+    try:
+        import config
+        private = getattr(config, "PRIVACY_MODE", False)
+    except Exception:
+        private = False
+    if private:
+        return f"<{len(text or '')} chars hidden — privacy mode>"
+    return repr(text)

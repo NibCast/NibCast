@@ -80,6 +80,8 @@ class FloatingWidget:
 
         self._click_recording  = False
         self._user_hidden      = False   # True when user deliberately hides via tray
+        self._caption          = None    # live-text Toplevel (created on first use)
+        self._caption_label    = None
 
         # Action callbacks
         self._on_start     = None
@@ -131,6 +133,50 @@ class FloatingWidget:
     def hide(self):
         """Return to idle (always-visible compact orb)."""
         self._enqueue(self._enter_idle)
+
+    def show_live_text(self, text: str):
+        """Show what NibCast is hearing in a caption above the widget (live preview)."""
+        self._enqueue(lambda: self._set_caption(text))
+
+    # ── Live caption ───────────────────────────────────────────
+
+    def _set_caption(self, text: str):
+        if not text or self._state not in ("recording", "processing") or self._user_hidden:
+            return
+        if self._caption is None:
+            cap = tk.Toplevel(self._root)
+            cap.overrideredirect(True)
+            cap.wm_attributes("-topmost", True)
+            cap.wm_attributes("-alpha", 0.92)
+            cap.configure(bg=self.C_BORDER)
+            lbl = tk.Label(cap, text="", bg="#141210", fg="#ece6da", justify="left",
+                           font=("Segoe UI", 10), wraplength=360, padx=10, pady=6)
+            lbl.pack(padx=1, pady=1)
+            # Clicks go to the widget, not the caption — it's display-only.
+            lbl.bind("<ButtonPress-1>", lambda e: "break")
+            self._caption, self._caption_label = cap, lbl
+        self._caption_label.config(text=text)
+        self._caption.update_idletasks()
+        cw = self._caption.winfo_reqwidth()
+        ch = self._caption.winfo_reqheight()
+        ww, _ = self._full_size() if self._state == "recording" else self._idle_size()
+        sw = self._root.winfo_screenwidth()
+        if self._widget_shape == "bar":
+            x = self._pos_x + ww // 2 - cw // 2          # centred over the bar
+        else:
+            x = self._pos_x + ww - cw                    # right-aligned with orb / chip
+        x = max(8, min(x, sw - cw - 8))
+        y = max(8, self._pos_y - ch - 8)
+        self._caption.geometry(f"+{x}+{y}")
+        self._caption.deiconify()
+
+    def _hide_caption(self):
+        if self._caption is not None:
+            try:
+                self._caption.withdraw()
+                self._caption_label.config(text="")
+            except Exception:
+                pass
 
     # ── Tkinter main loop ──────────────────────────────────────
 
@@ -199,6 +245,7 @@ class FloatingWidget:
 
     def _enter_idle(self):
         self._cancel_error_hide()
+        self._hide_caption()
         self._state = "idle"
         self._step  = 0
         self._click_recording = False
@@ -211,6 +258,7 @@ class FloatingWidget:
 
     def _enter_listening(self):
         self._cancel_error_hide()
+        self._hide_caption()
         self._state = "listening"
         self._step  = 0
         self._phase_start = time.time()
@@ -222,6 +270,7 @@ class FloatingWidget:
 
     def _enter_awake(self):
         self._cancel_error_hide()
+        self._hide_caption()
         self._state = "awake"
         self._step  = 0
         self._phase_start = time.time()
@@ -255,6 +304,7 @@ class FloatingWidget:
 
     def _enter_error(self):
         self._cancel_error_hide()
+        self._hide_caption()
         self._state = "error"
         self._step  = 0
         self._click_recording = False
@@ -381,6 +431,7 @@ class FloatingWidget:
             return
         self._user_hidden = not self._user_hidden
         if self._user_hidden:
+            self._enqueue(self._hide_caption)
             self._enqueue(self._root.withdraw)
         else:
             self._enqueue(self._root.deiconify)

@@ -19,7 +19,7 @@ import threading
 import requests
 
 import config
-from logger import log
+from logger import log, redact
 
 
 # ── Deepgram diarization formatter ──────────────────────────
@@ -89,6 +89,18 @@ _HALLUCINATIONS = {
 
 _PUNCT_ONLY = re.compile(r'^[\s.,!?;:\-–—…]+$')
 
+# YouTube-outro phrases Whisper invents on noise, in whatever language its
+# training subtitles had. Matched as substrings because the channel name varies
+# ("hãy subscribe cho kênh <name> để không bỏ lỡ những video hấp dẫn" showed up
+# repeatedly in real wake-word history). Kept specific so genuine dictation
+# that merely mentions subscribing is never dropped.
+_HALLUCINATION_PATTERNS = re.compile(
+    r"hãy subscribe cho kênh|không bỏ lỡ những video|"
+    r"subtitles by the amara|ご視聴ありがとうございました|"
+    r"untertitel (?:im auftrag|von)|sous-titres réalisés",
+    re.IGNORECASE,
+)
+
 def _is_hallucination(text: str) -> bool:
     t = (text or "").strip().lower()
     if not t:
@@ -96,6 +108,8 @@ def _is_hallucination(text: str) -> bool:
     if t in _HALLUCINATIONS:
         return True
     if _PUNCT_ONLY.fullmatch(t):
+        return True
+    if _HALLUCINATION_PATTERNS.search(t):
         return True
     return False
 
@@ -105,6 +119,17 @@ def _is_hallucination(text: str) -> bool:
 # Secondary backends we've already warned about (key missing) — so the warning
 # is logged once, not on every utterance.
 _warned_secondary: set = set()
+
+
+_CLOUD_ASR = frozenset({"groq", "openai", "deepgram", "nvidia"})
+
+
+def is_loopback_url(url: str) -> bool:
+    from urllib.parse import urlparse
+    try:
+        return urlparse(url or "").hostname in ("127.0.0.1", "localhost", "::1")
+    except ValueError:
+        return False
 
 
 def _backend_params(name: str, quiet: bool = False) -> dict | None:
@@ -117,6 +142,18 @@ def _backend_params(name: str, quiet: bool = False) -> dict | None:
     """
     _emit = log.debug if quiet else log.error
     n = name.strip().lower()
+    # Offline Mode: audio may only go to engines on this machine.
+    if getattr(config, "OFFLINE_MODE", False):
+        url = getattr(config, f"{n.upper()}_ASR_URL", "") if n in ("local", "custom") else ""
+        if n in _CLOUD_ASR or (n in ("local", "custom") and not is_loopback_url(url)):
+            _emit(f"🔒 Offline Mode — not sending audio to '{n}'. Use Local Whisper (in-app).")
+            return None
+    if n == "faster_whisper":
+        import local_asr
+        if not local_asr.available():
+            _emit("❌ Local Whisper needs:  pip install faster-whisper")
+            return None
+        return {"name": "Local Whisper", "kind": "faster_whisper", "model": ""}
     if n == "groq":
         key = getattr(config, "GROQ_API_KEY", "")
         if not key:
@@ -196,7 +233,7 @@ def has_configured_backend() -> bool:
     # logging "OPENAI_API_KEY not set" at ERROR here just because we checked whether
     # it could be a fallback is misleading noise in an otherwise-working setup.
     primary = getattr(config, "ASR_BACKEND", "groq").strip().lower()
-    if primary in ("local", "custom"):
+    if primary in ("local", "custom", "faster_whisper"):
         return _backend_params(primary, quiet=True) is not None
     if _backend_params(primary, quiet=True) is not None:
         return True
@@ -225,7 +262,11 @@ class Transcriber:
 
         p = _backend_params(primary)
         if p is None:
-            for fallback in ("groq", "openai", "local", "custom"):
+            # In-app Whisper joins the fallbacks once its model is on disk/in memory
+            # (never trigger a surprise download as a fallback).
+            import local_asr
+            _fallbacks = ("groq", "openai") + (("faster_whisper",) if local_asr.is_loaded() else ()) + ("local", "custom")
+            for fallback in _fallbacks:
                 if fallback == primary:
                     continue
                 p = _backend_params(fallback, quiet=True)   # probing alternatives — stay quiet
@@ -236,8 +277,10 @@ class Transcriber:
                 log.error("❌ No ASR backend is configured. Open Config → AI Backend.")
                 return ""
 
-        # Override model for this call without mutating the shared params dict
-        if model_override and p is not None:
+        # Override model for this call without mutating the shared params dict.
+        # The override is a Groq model name (GROQ_ASR_MODEL_WAKE) — sending it to
+        # OpenAI/custom servers 400s and silently broke wake words there.
+        if model_override and p is not None and p.get("name") == "Groq Whisper":
             p = {**p, "model": model_override}
             log.info(f"  → ASR model override: {model_override}")
 
@@ -270,21 +313,21 @@ class Transcriber:
                             f"engine, or turn off Brain Mode in Config → AI Backend.")
             return self._call(wav_bytes, primary, initial_prompt)
 
-        results = [None, None]
-
-        def run(idx, params):
-            results[idx] = self._call(wav_bytes, params, initial_prompt)
-
-        t1 = threading.Thread(target=run, args=(0, primary),  daemon=True)
-        t2 = threading.Thread(target=run, args=(1, s),        daemon=True)
-        t1.start(); t2.start()
-        t1.join(timeout=config.HTTP_TIMEOUT + 5)
-        t2.join(timeout=config.HTTP_TIMEOUT + 5)
+        # First usable transcript + a short grace window for the other engine,
+        # so pairing cloud with a slower local model doesn't slow every paste.
+        from hybrid import race_two
+        grace = float(getattr(config, "BRAIN_GRACE_SEC", 1.5))
+        results = race_two(
+            lambda: self._call(wav_bytes, primary, initial_prompt),
+            lambda: self._call(wav_bytes, s, initial_prompt),
+            timeout=config.HTTP_TIMEOUT + 5, grace=grace,
+            usable=lambda r: bool(r) and not _is_hallucination(r),
+        )
 
         if results[0] is None:
-            log.warning(f"🧠 Brain: {primary['name']} thread timed out — no result")
+            log.info(f"🧠 Brain: {primary['name']} missed the window — using {s['name']}")
         if results[1] is None:
-            log.warning(f"🧠 Brain: {s['name']} thread timed out — no result")
+            log.info(f"🧠 Brain: {s['name']} missed the window — using {primary['name']}")
 
         r1, r2 = results[0] or "", results[1] or ""
         log.info(f"🧠 Brain: [{primary['name']}]={len(r1)}ch  [{s['name']}]={len(r2)}ch")
@@ -315,6 +358,10 @@ class Transcriber:
 
     def _call(self, wav_bytes: bytes, p: dict, initial_prompt: str = "") -> str:
         kind = p.get("kind", "whisper")
+        if kind == "faster_whisper":
+            import local_asr
+            prompt = initial_prompt.strip() or getattr(config, "WHISPER_PROMPT", "").strip()
+            return local_asr.transcribe(wav_bytes, prompt)
         if kind == "deepgram":
             return self._call_deepgram(wav_bytes, p)
         return self._call_whisper(wav_bytes, p, initial_prompt)
@@ -362,7 +409,7 @@ class Transcriber:
                     except Exception as _parse_err:
                         log.warning(f"⚠️  [{name}] JSON parse failed: {_parse_err} — body: {resp.text[:200]}")
                         text = ""
-                    log.info(f"✅ [{name}] {text!r}")
+                    log.info(f"✅ [{name}] {redact(text)}")
                     return text
                 if 400 <= resp.status_code < 500:
                     log.error(f"❌ [{name}] HTTP {resp.status_code}: {resp.text[:300]}")
@@ -424,7 +471,7 @@ class Transcriber:
                         text = resp.json().get("text", "").strip()
                     except Exception:
                         text = resp.text.strip()
-                    log.info(f"✅ [{name}] {text!r}")
+                    log.info(f"✅ [{name}] {redact(text)}")
                     return text
 
                 if 400 <= resp.status_code < 500:

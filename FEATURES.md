@@ -20,6 +20,20 @@ NibCast offers four ways to start dictating, mixable to taste:
 | **Toggle** | Press once to start, again to stop. |
 | **Hands-free** | A hotkey arms continuous dictation. |
 | **Voice activation** | Say a **wake word** ("hey jarvis", "hey hulk", …) and dictate hands-free. |
+| **Mouse button** | Hold a mouse thumb button (X1/X2) or the middle button to talk. |
+| **Double-tap** | Tap Right Ctrl / Right Alt / Right Shift / Caps Lock twice to start, twice to paste. |
+
+### Local wake-word engine
+Pick **WAKE ENGINE → Local keyword spotter** (Config → Wake Phrase) and NibCast
+listens for your typed phrase with a tiny on-device model — instant, offline, and
+nothing is recorded or uploaded until you say it. A sensitivity slider trades
+false wakes against missed ones. With the speech-recognition engine instead,
+**SUGGEST FROM HISTORY** learns how your phrase keeps being misheard.
+
+### While you dictate
+- **Live text** — a caption above the widget shows what's being heard.
+- **Pause music** — playing media pauses and resumes automatically.
+- **Screen context** (optional) — names visible in the active window are spelled right.
 
 Wake-word listening is a two-phase engine: a low-cost local energy detector
 wakes the cloud transcriber only when it hears speech, then a fuzzy match
@@ -50,6 +64,13 @@ the cleanup LLM corrects obvious sound-alikes — e.g. "cloud code" → **Claude
 Code**, "deep gram" → **Deepgram**, "nib cast" → **NibCast** — without ever
 inserting a term you didn't say.
 
+### Paste-ready formatting
+Spoken lists become numbered lists, items that share details become a table in
+apps that render Markdown (Notion, Obsidian, code editors, AI chats), and fillers,
+padding sentences, stutters, false starts and self-corrections are removed. In
+ChatGPT / Claude / Gemini windows the **AI Prompt** mode keeps your request in
+your own words; emails get greeting / body / sign-off on their own lines.
+
 ### Writing styles
 Choose how the cleanup reshapes your speech:
 - **Flow** — clean prose, light restructuring (default)
@@ -57,9 +78,11 @@ Choose how the cleanup reshapes your speech:
 - **Professional** — formal, polished
 - **Concise** — trimmed to the essential point
 
-### Brain Mode (optional)
-Run two engines in parallel and automatically keep the better result — for both
-transcription (e.g. Groq Whisper + Deepgram) and cleanup. Opt-in; single-engine
+### Hybrid / Brain Mode (optional)
+Run two engines in parallel and automatically keep the better result — for
+transcription (e.g. Groq Whisper + In-app Whisper) and, separately, for cleanup
+(e.g. Groq + a local model). The first good answer wins after a short grace
+window, so a slower local engine never delays a paste. Opt-in; single-engine
 **Groq (free tier)** remains the zero-cost default.
 
 ---
@@ -69,10 +92,14 @@ transcription (e.g. Groq Whisper + Deepgram) and cleanup. Opt-in; single-engine
 Everything is swappable, and your audio only ever goes to the provider **you**
 choose.
 
-- **Transcription (ASR):** Groq Whisper (free), OpenAI, Deepgram, a local Whisper
-  server, or any custom endpoint.
+- **Transcription (ASR):** Groq Whisper (free), OpenAI, Deepgram, **In-app
+  Whisper** (runs inside NibCast, fully offline), a local Whisper server, or any
+  custom endpoint.
 - **Cleanup (LLM):** Groq, Cerebras, Google Gemini, OpenAI, Anthropic, NVIDIA
-  NIM, Ollama (fully local/offline), or custom.
+  NIM, **local models** (Ollama, LM Studio, llama.cpp, Jan — found by DETECT
+  LOCAL MODELS), or custom. A **fallback** LLM takes over when the primary is
+  rate-limited.
+- **Offline Mode** guarantees nothing leaves your PC.
 - **Streaming** output and multi-language support.
 
 ---

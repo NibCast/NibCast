@@ -137,6 +137,7 @@ body{
 .tag{display:inline-block;font-size:8px;letter-spacing:1px;text-transform:uppercase;padding:2px 6px;border:1px solid;border-radius:var(--vf-radius);font-family:var(--vf-font-b)}
 .tag.code,.tag.vscode,.tag.terminal{border-color:var(--vf-cyan);color:var(--vf-cyan)}
 .tag.chat{border-color:var(--vf-pri);color:var(--vf-pri)}
+.tag.ai{border-color:var(--vf-cyan);color:var(--vf-cyan)}
 .tag.docs,.tag.notes,.tag.email{border-color:var(--vf-purple);color:var(--vf-purple)}
 .tag.forms,.tag.browser{border-color:var(--vf-orange);color:var(--vf-orange)}
 .tag.general,.tag.generic{border-color:var(--vf-dim);color:var(--vf-dim)}
