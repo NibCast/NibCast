@@ -1,7 +1,7 @@
 # ============================================================
 #  NibCast — Main Entry Point
 # ============================================================
-__version__ = "2.4.2"
+__version__ = "2.7.0"
 
 import sys
 
@@ -41,14 +41,14 @@ try:
 
     from audio_recorder   import AudioRecorder
     from transcriber      import Transcriber, _is_hallucination, has_configured_backend
-    from text_processor   import TextProcessor
+    from text_processor   import TextProcessor, _fix_duplicates
     from text_injector    import TextInjector
     from hotkey_listener  import HotkeyListener
     from tray_ui          import TrayUI
     from settings_window  import SettingsWindow
     from floating_widget  import FloatingWidget
     from editor_popup     import edit_text_blocking
-    from logger           import log
+    from logger           import log, redact
 except ImportError as _e:
     _missing = getattr(_e, "name", "") or "a required package"
     _tk_hint = ("\nNote: 'tkinter' ships with the standard python.org installer "
@@ -185,6 +185,7 @@ _near_silence_streak = 0
 # the VAD thread, the hotkey-release thread, and the _window_timeout timer thread.
 _wake_lock                = threading.Lock()
 _vad_awake_until          = 0.0
+_wake_window_gen          = 0     # bumped per command window, so a stale timeout can't close a newer one
 _vad_is_command_recording = False
 _phase1_busy_since        = 0.0
 
@@ -204,10 +205,12 @@ def _is_vad_awake() -> bool:
 
 def _arm_vad_awake():
     """Wake word confirmed — open a command window and switch VAD to command mode."""
-    global _vad_awake_until
+    global _vad_awake_until, _wake_window_gen
     secs = float(getattr(config, "WAKE_WORD_LISTEN_SEC", 12.0))
     with _wake_lock:
         _vad_awake_until = time.time() + secs
+        _wake_window_gen += 1
+        my_gen = _wake_window_gen
     log.info(f"👂 Listening for command ({secs:.0f}s window)…")
     # Switch to command mode: normal threshold + silence window + no duration cap
     if voice_act is not None:
@@ -215,11 +218,15 @@ def _arm_vad_awake():
     # Ding + teal widget glow tells the user the wake was confirmed and they can speak
     notifier.ding_start()
     widget.show_awake()
+    import media_control
+    media_control.pauser.pause()      # quiet the room for the command
 
     # Safety timer: if no Phase-2 recording starts before the window closes,
     # reset VAD back to sleep so the wake word can be triggered again.
     # Without this, mode stays "command" indefinitely after a timed-out window.
     def _window_timeout():
+        if my_gen != _wake_window_gen:
+            return  # the window was re-armed since — its own timer handles it
         if _vad_is_command_recording:
             return  # Phase-2 is in progress — finish_command_recording handles the reset
         if voice_act is not None:
@@ -229,6 +236,7 @@ def _arm_vad_awake():
                 voice_act.set_mode("sleep")
                 state.set_state("idle")
                 widget.hide()
+                _dictation_stopped()
 
     t = threading.Timer(secs + 0.5, _window_timeout)
     t.daemon = True
@@ -347,7 +355,7 @@ def _match_wake_word(raw_text: str, wake_word: str) -> tuple:
         for sfx_len in range(n - 1, min_sfx - 1, -1):
             sfx = w_words[-sfx_len:]
             if len(t_words) == sfx_len and t_words == sfx:
-                log.info(f"🔑 Wake partial match ({sfx_len}/{n} words: {sfx})")
+                log.info(f"🔑 Wake partial match ({sfx_len}/{n} words)")
                 return True, _remaining(sfx_len)
 
     # ── 3. Same-length fuzzy (Whisper phonetic substitution) ──
@@ -357,7 +365,7 @@ def _match_wake_word(raw_text: str, wake_word: str) -> tuple:
         # (single-word exact matches are caught by rule 1 or allowed only when n==1)
         if n >= 2 and t_words[-1] == w_words[-1] and t_words[0] == w_words[0]:
             # Both first AND last must match exactly for 2-word phrases
-            log.info(f"🔑 Wake fuzzy 3a: first+last exact ({t_words[0]!r},{t_words[-1]!r})")
+            log.info(f"🔑 Wake fuzzy 3a: first+last exact ({redact(t_words[0])},{redact(t_words[-1])})")
             return True, _remaining(n)
 
         # 3b: first word exact + last word phonetically similar.
@@ -372,7 +380,7 @@ def _match_wake_word(raw_text: str, wake_word: str) -> tuple:
             sim = _jaro(t_words[1], w_words[1])
             if sim >= _fuzzy_floor:
                 log.info(f"🔑 Wake fuzzy 3b: first exact + last Jaro={sim:.2f} "
-                         f"({t_words[1]!r}≈{w_words[1]!r})")
+                         f"(heard={redact(t_words[1])})")
                 return True, _remaining(n)
 
         # 3c: all words phonetically similar (raised floors: each ≥0.55, avg ≥0.65)
@@ -390,7 +398,7 @@ def _match_wake_word(raw_text: str, wake_word: str) -> tuple:
         else:
             ok = all(s >= 0.55 for s in sims) and sum(sims) / n >= 0.65
         if ok:
-            log.info(f"🔑 Wake fuzzy 3c: avg Jaro={sum(sims)/n:.2f} {list(zip(t_words, w_words))}")
+            log.info(f"🔑 Wake fuzzy 3c: avg Jaro={sum(sims)/n:.2f} heard={redact(' '.join(t_words))}")
             return True, _remaining(n)
 
     return False, ""
@@ -455,6 +463,58 @@ def _do_quit():
 
 # ── Pipeline ─────────────────────────────────────────────────
 
+# ── Dictation extras: live preview, media pause, screen context ─
+
+_live_preview   = None   # LivePreview for the current recording
+_screen_capture = None   # screen_context.Capture started with the current recording
+
+
+def _dictation_started():
+    """A dictation (not a Phase-1 wake clip) just started recording."""
+    global _live_preview, _screen_capture
+    import media_control
+    media_control.pauser.pause()
+    # Keep a local cleanup model loaded: Ollama unloads it after its keep-alive,
+    # and a cold reload (5–20 s) would make hybrid miss its window every time.
+    import local_models
+    local_models.warm_if_stale()
+    if getattr(config, "SCREEN_CONTEXT", False):
+        import screen_context
+        _screen_capture = screen_context.Capture()
+    else:
+        _screen_capture = None
+    try:
+        import live_preview
+        if _live_preview is not None:
+            _live_preview.stop()
+        lp = live_preview.LivePreview(recorder, widget.show_live_text)
+        _live_preview = lp if lp.start() else None
+    except Exception as e:
+        log.debug(f"Live preview unavailable: {e}")
+        _live_preview = None
+
+
+def _dictation_stopped():
+    """Recording ended (pasted, cancelled, or the command window closed)."""
+    global _live_preview
+    if _live_preview is not None:
+        _live_preview.stop()
+        _live_preview = None
+    import media_control
+    media_control.pauser.resume()
+
+
+def _screen_terms() -> list:
+    global _screen_capture
+    cap, _screen_capture = _screen_capture, None
+    if cap is None:
+        return []
+    terms = cap.terms()
+    if terms:
+        log.info(f"🖥️  Screen context: {len(terms)} term(s)")
+    return terms
+
+
 def on_hotkey_press():
     global _record_start, _recording_source
     _recording_source = "hotkey"
@@ -466,6 +526,7 @@ def on_hotkey_press():
     notifier.ding_start()
     _record_start = time.time()
     recorder.start()
+    _dictation_started()
 
 
 def on_vad_press():
@@ -506,6 +567,7 @@ def on_vad_press():
         state.set_state("recording")
         if tray: tray.set_recording()
         widget.show_recording()
+        _dictation_started()
     else:
         # Phase 1: ambient check for wake phrase — no widget animation until wake confirmed
         with _wake_lock:
@@ -534,6 +596,7 @@ def on_cancel_recording():
     Triggered by the widget stop button (■) or by clicking the awake (READY) state."""
     if recorder.is_recording:
         recorder.stop()
+    _dictation_stopped()
     _disarm_vad_awake()
     _finish_command_recording()   # always safe to call; resets flag + returns to sleep
     state.set_state("idle")
@@ -558,7 +621,7 @@ def _expand_snippets(text: str) -> str:
     normalized = re.sub(r'[.!?]+$', '', text.strip()).lower().strip()
     for phrase, expansion in snippets.items():
         if normalized == phrase.lower().strip():
-            log.info(f"📎 Snippet: '{phrase}' → '{expansion}'")
+            log.info(f"📎 Snippet: {redact(phrase)} → {len(expansion)} chars")
             return expansion
     return text
 
@@ -595,6 +658,8 @@ def on_hotkey_release():
 
 def _run_release_pipeline():
     wav_bytes    = recorder.stop()
+    if _recording_source != "vad" or _vad_is_command_recording:
+        _dictation_stopped()        # resume music now, not after transcription
     duration_sec = round(time.time() - _record_start, 2)
     target_info  = tm.detect_target()
 
@@ -827,6 +892,7 @@ def _run_release_pipeline():
     _wake_model  = getattr(config, "GROQ_ASR_MODEL_WAKE", "").strip() if is_vad_wake_phase else ""
     _base_prompt = getattr(config, "WHISPER_PROMPT", "").strip()
 
+    _llm_screen_hint = ""   # set below for dictation; wake clips never read the screen
     if not is_vad_wake_phase:
         # Whisper prompt = the user's curated dictionary (WHISPER_PROMPT — names,
         # jargon, product terms) PLUS the vocabulary learned from past transcripts
@@ -842,9 +908,13 @@ def _run_release_pipeline():
         _dict_ws = " ".join(_base_prompt.replace(",", " ").split())
         # Keep the TAIL (Whisper conditions on the last tokens of the prompt) so the
         # curated dictionary, placed last, is the part that survives if it's long.
-        _combined_prompt = " ".join(p for p in (app_vocab, _dict_ws) if p)[-800:].strip()
+        _scr = _screen_terms()
+        if _scr:
+            import screen_context
+            _llm_screen_hint = screen_context.prompt_hint(_scr)
+        _combined_prompt = " ".join(p for p in (app_vocab, " ".join(_scr), _dict_ws) if p)[-800:].strip()
         if app_vocab:
-            log.info(f"📚 App vocab hint: {app_vocab[:80]}…")
+            log.info(f"📚 App vocab hint: {redact(app_vocab[:80])}…")
     else:
         # Title-case the wake word for the Whisper prompt so it recognises it as a
         # proper noun/name, which significantly reduces phonetic substitutions.
@@ -868,7 +938,7 @@ def _run_release_pipeline():
 
     # Layer 2: hallucination / empty transcript filter
     if raw_text and _is_hallucination(raw_text):
-        log.warning(f"⏩ Wake check L2: ASR hallucination {raw_text!r} — discarding")
+        log.warning(f"⏩ Wake check L2: ASR hallucination {redact(raw_text)} — discarding")
         raw_text = ""
     if not raw_text:
         if is_vad_wake_phase:
@@ -917,7 +987,7 @@ def _run_release_pipeline():
             if remaining.strip():
                 # Wake phrase + command in one breath — skip Phase 2 entirely,
                 # process the remaining text directly (never set _vad_is_command_recording).
-                log.info(f"   Command in same utterance: {remaining!r}")
+                log.info(f"   Command in same utterance: {redact(remaining)}")
                 raw_text = remaining
                 _disarm_vad_awake()
                 if voice_act is not None:
@@ -963,12 +1033,27 @@ def _run_release_pipeline():
         _word_count_raw = len(raw_text.split())
         _rms_low = rms < 0.018
         if _word_count_raw <= 2 and _rms_low:
-            log.warning(f"⏩ Phase 2 ambient guard: {raw_text!r} "
+            log.warning(f"⏩ Phase 2 ambient guard: {redact(raw_text)} "
                         f"({_word_count_raw} words, RMS={rms:.4f}) — discarding")
             _finish_command_recording()
             widget.hide()
             _arm_vad_cooldown()
             return
+
+    # Phase 2 re-wake: the user said the wake phrase AGAIN instead of a command
+    # (usually because they missed the ding). Pasting it would type "Hey Nova
+    # Hey Nova" into their document — re-open the command window instead.
+    if _is_cmd and raw_text and _ww_enabled and _ww_str:
+        _heard = _fix_duplicates(raw_text, keep_names=False)
+        for _phrase in [_ww_str, *getattr(config, "WAKE_WORD_ALTERNATIVES", [])]:
+            _m, _rest = _match_wake_word(_heard, _phrase)
+            if _m and not _rest.strip():
+                log.info("👂 Command was only the wake phrase — re-arming command window")
+                _finish_command_recording()
+                state.set_state("idle")
+                if tray: tray.set_idle()
+                _arm_vad_awake()
+                return
 
     if not raw_text:
         log.warning("Empty transcript")
@@ -1007,7 +1092,10 @@ def _run_release_pipeline():
         _arm_vad_cooldown()
         return
 
-    clean_text = processor.clean(raw_text, llm_hint=target_info.get("llm_hint", ""))
+    _hint = target_info.get("llm_hint", "")
+    if _llm_screen_hint:
+        _hint = f"{_hint}\n{_llm_screen_hint}".strip()
+    clean_text = processor.clean(raw_text, llm_hint=_hint)
     clean_text = _apply_rules(clean_text, target_info)
 
     # Snippet expansion: whole utterance matching a configured phrase → replacement text
@@ -1028,6 +1116,7 @@ def _run_release_pipeline():
                 category=target_info["category"],
                 language=config.LANGUAGE,
                 status="cancelled",
+                llm_status=processor.last_status,
             )
             if _is_cmd:
                 _finish_command_recording()
@@ -1038,7 +1127,7 @@ def _run_release_pipeline():
         clean_text = edited
 
     global _last_paste_text, _last_paste_chars
-    log.info(f"📝 Pasting: '{clean_text}' → {target_info['label']}")
+    log.info(f"📝 Pasting: {redact(clean_text)} → {target_info['label']}")
     injector.inject(clean_text)
     for key in post_keys:
         injector.press_key(key)
@@ -1054,6 +1143,7 @@ def _run_release_pipeline():
         category=target_info["category"],
         language=config.LANGUAGE,
         status="success",
+        llm_status=processor.last_status,
     )
 
     state.set_state("idle")
@@ -1124,7 +1214,7 @@ def on_command_release():
         _flash_error("NO INSTRUCTION", "Could not hear the editing instruction")
         return
 
-    log.info(f"🎙️  Command instruction: {instruction!r}")
+    log.info(f"🎙️  Command instruction: {redact(instruction)}")
 
     if _selected_text:
         result = processor.command(_selected_text, instruction)
@@ -1155,6 +1245,7 @@ def on_command_release():
             category=target_info["category"],
             language=config.LANGUAGE,
             status="success",
+            llm_status=processor.last_status,
         )
 
     state.set_state("idle")
@@ -1222,7 +1313,7 @@ def on_undo_last():
     if not _last_paste_chars:
         log.info("↩️  Undo: nothing to undo")
         return
-    log.info(f"↩️  Undo last paste ({_last_paste_chars} chars): '{_last_paste_text[:40]}'")
+    log.info(f"↩️  Undo last paste ({_last_paste_chars} chars): {redact(_last_paste_text[:40])}")
     try:
         import pyautogui as _pg
         _pg.hotkey("ctrl", "z")
@@ -1306,7 +1397,50 @@ def apply_wake_word_setting() -> bool:
     elif wake_enabled and not wake_word:
         log.warning("Voice activation enabled but no wake phrase set — hotkeys only.")
 
+    if voice_act is not None:
+        _sync_wake_engine()
     return voice_act is not None
+
+
+_kws_key = None   # (engine, phrase, sensitivity) the attached spotter was built for
+
+def _sync_wake_engine():
+    """Attach / rebuild / detach the local keyword spotter to match config.
+    Building takes ~0.3 s, so it runs off the caller's thread."""
+    global _kws_key
+    engine = getattr(config, "WAKE_ENGINE", "asr")
+    key = (engine, (getattr(config, "WAKE_WORD", "") or "").strip().lower(),
+           float(getattr(config, "WAKE_KWS_SENSITIVITY", 0.5)))
+    if key == _kws_key and (engine != "kws" or (voice_act and voice_act.uses_keyword_spotter)):
+        return
+    _kws_key = key
+    if engine != "kws":
+        if voice_act is not None and voice_act.uses_keyword_spotter:
+            voice_act.attach_keyword_spotter(None, None)
+            log.info("🔑 Wake engine: speech recognition (clip + ASR)")
+        return
+
+    def _build():
+        import wake_engine
+        spotter = wake_engine.build_spotter()
+        if voice_act is None:
+            return
+        if spotter is None:
+            log.warning("🔑 Local wake engine unavailable — using speech recognition for the wake word")
+        voice_act.attach_keyword_spotter(spotter, _on_local_wake if spotter else None)
+    threading.Thread(target=_build, daemon=True, name="KWSBuild").start()
+
+
+def _on_local_wake(label: str):
+    """The local keyword spotter heard the wake phrase — open the command window
+    directly. No clip was recorded and nothing was sent anywhere."""
+    if recorder.is_recording or _vad_is_command_recording:
+        return
+    log.info("🔑 Wake word confirmed (local engine)")
+    _arm_vad_awake()
+    db.save_transcription(raw_text=label, clean_text="", duration_sec=0.0,
+                          target_app=tm.detect_target()["label"], category="generic",
+                          language=config.LANGUAGE, status="wake_word")
 
 
 # ── Entry point ──────────────────────────────────────────────
@@ -1351,6 +1485,19 @@ def main():
 
     web_dashboard.start_dashboard()
     web_dashboard.set_widget_ref(widget)   # enables live style/shape changes from dashboard
+
+    # In-app Whisper selected? Load it in the background now (first run downloads
+    # the model) instead of stalling the first dictation or wake check.
+    if getattr(config, "ASR_BACKEND", "") == "faster_whisper":
+        import local_asr
+        local_asr.load_async()
+
+    # Local LLM in use (primary or fallback)? Load it now so the first dictation
+    # doesn't stall for the 5–20 s a cold model takes to load.
+    import local_models
+    if local_models.local_llm_in_use():
+        local_models.warm_up_async(getattr(config, "OLLAMA_BASE_URL", ""),
+                                   getattr(config, "OLLAMA_LLM_MODEL", ""))
     widget.set_icon_style(getattr(config, "WIDGET_STYLE", "wave"))
     widget.set_widget_shape(getattr(config, "WIDGET_SHAPE", "orb"))
     widget.set_theme(getattr(config, "WIDGET_THEME", "amber"))

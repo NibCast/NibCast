@@ -49,7 +49,7 @@ LLM_MODEL = "meta/llama-3.3-70b-instruct"
 # NOTE: NVIDIA's integrate.api.nvidia.com does NOT host audio/ASR endpoints.
 # Their /v1/audio/transcriptions returns 404 — use Groq or OpenAI for ASR.
 
-# ASR Backend: "groq" | "openai" | "nvidia" | "local" | "custom"
+# ASR Backend: "groq" | "openai" | "deepgram" | "faster_whisper" (in-app) | "local" (server) | "custom"
 ASR_BACKEND = "groq"
 # LLM Backend: "groq" | "cerebras" | "gemini" | "nvidia" | "openai" | "ollama" | "anthropic" | "custom"
 LLM_BACKEND = "groq"
@@ -87,6 +87,14 @@ BRAIN_MODE          = False
 # engine has no key, NibCast quietly uses the primary only.
 ASR_BRAIN_SECONDARY = "deepgram"
 LLM_BRAIN_SECONDARY = ""
+# Hybrid cleanup: run LLM_BRAIN_SECONDARY in parallel with LLM_BACKEND and keep
+# the better text. Explicit opt-in, separate from BRAIN_MODE (dual ASR). Older
+# configs are migrated in load(): it's on if BRAIN_MODE + a secondary were set.
+LLM_HYBRID = False
+# Hybrid timing: once one engine returns a usable result, wait at most this long
+# for the other before picking. Lets a cloud + local pair run without making
+# every paste wait for the slower engine.
+BRAIN_GRACE_SEC = 1.5
 
 # Anthropic (LLM only)
 ANTHROPIC_API_KEY   = ""
@@ -119,6 +127,17 @@ OLLAMA_LLM_MODEL = "llama3.2"
 LOCAL_ASR_URL   = "http://localhost:8000/v1/audio/transcriptions"
 LOCAL_ASR_MODEL = "whisper-1"
 
+# Local Whisper — runs inside NibCast (pip install faster-whisper). No server,
+# no key, audio never leaves the machine. Model downloads once to
+# ~/.nibcast/models. See local_asr.MODELS for the options.
+LOCAL_WHISPER_MODEL  = "small.en"
+LOCAL_WHISPER_DEVICE = "auto"     # "auto" (CUDA if present) | "cpu" | "cuda"
+
+# Offline Mode — hard guard: when True, audio and text may only go to engines on
+# this machine (Local Whisper, a localhost ASR/LLM server). Cloud backends are
+# refused even if selected or set as fallback.
+OFFLINE_MODE = False
+
 # Deepgram (ASR only) — nova-3 is their most accurate model for general speech
 # Free tier: 12,000 min/month. Get a key at console.deepgram.com
 DEEPGRAM_API_KEY   = ""
@@ -149,6 +168,16 @@ WAKE_WORD_LISTEN_SEC = 12.0
 # near-misses like "Hey Fowler" ≈ "hey flow" (Jaro 0.76) while still catching close
 # same-speaker mishears (e.g. "hey glow"/"hey low").
 WAKE_WORD_FUZZY_THRESHOLD = 0.80
+# Wake engine:
+#   "asr" — record a short clip on voice energy and ask the ASR backend whether
+#           it was the wake phrase (works everywhere; uploads ambient clips when
+#           the ASR backend is a cloud service).
+#   "kws" — local keyword spotter (wake_engine.py, sherpa-onnx): listens for the
+#           phrase on this PC, instant, nothing recorded or uploaded while asleep.
+#           Needs  pip install sherpa-onnx sentencepiece  + a one-time ~17 MB model.
+WAKE_ENGINE = "asr"
+# 0 = strict (fewer false wakes) … 1 = eager (catches quiet/fast speech).
+WAKE_KWS_SENSITIVITY = 0.5
 # Voice enrollment (speaker verification for wake phrase).
 # Default OFF: the lightweight spectral matcher rejected genuine same-speaker
 # clips often enough (scores ~0.50) to make the wake word feel broken, so out of
@@ -227,6 +256,30 @@ HOTKEY_CONFIGS = [
     {"combo": "<scroll_lock>",            "mode": "hold"},
 ]
 
+# Extra, chord-free ways to start dictating (both off by default; applied live).
+#   MOUSE_PTT_BUTTON: "" | "x1" (thumb back button) | "x2" (thumb forward) | "middle"
+#     The button's normal action is suppressed on Windows while assigned.
+#   MOUSE_PTT_MODE:   "hold" (hold to talk, release to paste) | "toggle"
+#   DOUBLE_TAP_KEY:   "" | "ctrl_r" | "alt_r" | "shift_r" | "caps_lock" — tap
+#     twice quickly to start, twice again to stop and paste.
+MOUSE_PTT_BUTTON = ""
+MOUSE_PTT_MODE   = "hold"
+DOUBLE_TAP_KEY   = ""
+
+# Dictation extras (see live_preview.py, media_control.py, screen_context.py)
+#   LIVE_PREVIEW: "auto" — show words above the widget while you speak, using
+#                 In-app Whisper when it's loaded (free, private); "cloud" — also
+#                 allow the cloud ASR on a short tail window (uses quota); "off".
+#   PAUSE_MEDIA_WHILE_DICTATING: pause playing music/video, resume after
+#                 (Windows, needs  pip install winsdk).
+#   SCREEN_CONTEXT: read names/terms from the active window to spell them right
+#                 (title always; on-screen text via on-device Windows OCR when
+#                 SCREEN_CONTEXT_OCR and winsdk are available). Off by default.
+LIVE_PREVIEW                = "auto"
+PAUSE_MEDIA_WHILE_DICTATING = False
+SCREEN_CONTEXT              = False
+SCREEN_CONTEXT_OCR          = True
+
 # Recording mode: "hold" | "toggle" | "voice"  (kept for backward compat and voice-mode flag)
 RECORDING_MODE = "hold"
 
@@ -295,6 +348,8 @@ _PERSISTED_KEYS = (
     "NVIDIA_API_KEY", "ASR_MODEL", "LLM_MODEL",
     "SAMPLE_RATE", "INPUT_DEVICE",
     "HOTKEY_COMBOS", "HOTKEY_CONFIGS", "HOLD_TO_TALK",
+    "MOUSE_PTT_BUTTON", "MOUSE_PTT_MODE", "DOUBLE_TAP_KEY",
+    "LIVE_PREVIEW", "PAUSE_MEDIA_WHILE_DICTATING", "SCREEN_CONTEXT", "SCREEN_CONTEXT_OCR",
     "CLEAN_WITH_LLM", "LANGUAGE", "APPEND_NEWLINE",
     "SHOW_NOTIFICATION", "PRESERVE_CLIPBOARD",
     "EDIT_BEFORE_PASTE", "AUDIO_CUES",
@@ -316,14 +371,15 @@ _PERSISTED_KEYS = (
     "GEMINI_API_KEY", "GEMINI_LLM_MODEL",
     "OLLAMA_BASE_URL", "OLLAMA_LLM_MODEL",
     "LOCAL_ASR_URL", "LOCAL_ASR_MODEL",
+    "LOCAL_WHISPER_MODEL", "LOCAL_WHISPER_DEVICE", "OFFLINE_MODE",
     "DEEPGRAM_API_KEY", "DEEPGRAM_ASR_URL", "DEEPGRAM_ASR_MODEL", "DEEPGRAM_DIARIZE",
     "CUSTOM_API_KEY", "CUSTOM_ASR_URL", "CUSTOM_ASR_MODEL",
     "CUSTOM_LLM_URL", "CUSTOM_LLM_MODEL",
     # Brain Mode
-    "BRAIN_MODE", "ASR_BRAIN_SECONDARY", "LLM_BRAIN_SECONDARY",
+    "BRAIN_MODE", "ASR_BRAIN_SECONDARY", "LLM_BRAIN_SECONDARY", "BRAIN_GRACE_SEC", "LLM_HYBRID",
     # Wake word
     "WAKE_WORD", "WAKE_WORD_ENABLED", "WAKE_WORD_LISTEN_SEC",
-    "WAKE_WORD_FUZZY_THRESHOLD",
+    "WAKE_WORD_FUZZY_THRESHOLD", "WAKE_ENGINE", "WAKE_KWS_SENSITIVITY",
     "WAKE_WORD_VAD_THRESHOLD", "WAKE_WORD_SILENCE_SEC",
     "WAKE_AUTO_RAISE_ENABLED",
     "WAKE_WORD_TRIGGER_SEC", "WAKE_WORD_MAX_RECORD_SEC",
@@ -442,6 +498,11 @@ def load():
             g["RECORDING_MODE"] = "hold"
         else:
             g["RECORDING_MODE"] = "toggle"
+
+    # Migrate: hybrid cleanup used to be BRAIN_MODE + LLM_BRAIN_SECONDARY.
+    # Keep exactly that behaviour for configs saved before LLM_HYBRID existed.
+    if data and "LLM_HYBRID" not in data:
+        g["LLM_HYBRID"] = bool(g.get("BRAIN_MODE") and g.get("LLM_BRAIN_SECONDARY"))
 
     # Env vars (highest priority for secrets)
     env_key = os.environ.get("NIBCAST_NVIDIA_API_KEY", "").strip()

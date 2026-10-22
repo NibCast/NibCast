@@ -6,6 +6,7 @@
 #  Switch with set_mode().  Post-hotkey cooldown via set_cooldown().
 # ============================================================
 
+import queue
 import threading
 import time
 
@@ -62,6 +63,14 @@ class VoiceActivator:
         self._rms_ema        = 0.0
         self._noise_floor    = 0.0   # ambient level, tracked while idle in sleep mode
         self._phase1_busy    = False
+        # Local keyword spotter (wake_engine.py). When attached, sleep mode feeds
+        # every audio block to it instead of recording clips for cloud ASR.
+        self._kws            = None
+        self._on_kws_wake    = None
+        self._kws_q          = queue.Queue(maxsize=64)   # ~3 s of blocks; drops if the CPU falls behind
+        self._kws_thread     = None
+        self._kws_alive      = True      # cleared by stop(); worker lives until then
+        self._kws_quiet_until = 0.0      # re-detection guard (separate from the VAD cooldown)
 
     # ── Public API ─────────────────────────────────────────────
 
@@ -75,7 +84,65 @@ class VoiceActivator:
 
     def stop(self):
         self._running = False
+        self._kws = None
+        self._kws_alive = False
         self._recorder.close_persistent_stream()
+
+    # ── Local keyword spotter ──────────────────────────────────
+
+    def attach_keyword_spotter(self, spotter, on_wake):
+        """Use `spotter` for Phase 1. `on_wake(label)` is called (on a worker
+        thread) when it hears the wake phrase. Pass spotter=None to go back to
+        clip-recording + ASR wake detection."""
+        self._on_kws_wake = on_wake
+        self._kws = spotter
+        self._drain_kws()
+        if spotter is not None and (self._kws_thread is None or not self._kws_thread.is_alive()):
+            self._kws_thread = threading.Thread(target=self._kws_loop, daemon=True, name="KWSWorker")
+            self._kws_thread.start()
+
+    @property
+    def uses_keyword_spotter(self) -> bool:
+        return self._kws is not None
+
+    def _drain_kws(self):
+        try:
+            while True:
+                self._kws_q.get_nowait()
+        except queue.Empty:
+            pass
+
+    def _kws_loop(self):
+        # Runs the model off the realtime audio thread so a slow CPU can never
+        # stall the stream (which would starve the recorder and the meter).
+        # Stays alive across detach/attach (until stop()), so re-attaching a
+        # rebuilt spotter can never race a worker that is about to exit.
+        while self._kws_alive:
+            try:
+                samples, rate = self._kws_q.get(timeout=0.5)
+            except queue.Empty:
+                continue
+            spotter = self._kws
+            if spotter is None:
+                continue
+            try:
+                hits = spotter.accept(samples, rate)
+            except Exception as e:
+                log.error(f"Keyword spotter error: {e}")
+                continue
+            if not hits:
+                continue
+            if (self._mode != "sleep" or time.time() < max(self._cooldown_until, self._kws_quiet_until)
+                    or self._recorder.is_recording or self._is_recording):
+                continue      # heard it, but we're busy — ignore
+            log.info(f"🔑 Wake phrase heard locally: {hits[0]!r}")
+            # Don't arm the VAD cooldown here: command mode honours it, and
+            # "hey nova send Bob the report" in one breath must start recording
+            # right away. Only block a second detection of the same phrase.
+            self._kws_quiet_until = time.time() + 1.5
+            cb = self._on_kws_wake
+            if cb:
+                threading.Thread(target=cb, args=(hits[0],), daemon=True, name="KWSWake").start()
 
     def set_mode(self, mode: str):
         """
@@ -91,6 +158,14 @@ class VoiceActivator:
                 # Reset EMA so Phase-1 residual energy doesn't suppress Phase-2 onset
                 self._rms_ema    = 0.0
                 self._above_since = None
+            elif self._kws is not None:
+                # Back to sleep: forget the command audio so its tail can't
+                # combine with new speech into a false wake.
+                self._drain_kws()
+                try:
+                    self._kws.reset()
+                except Exception:
+                    pass
             log.info(f"VAD: mode → {mode}")
 
     def set_cooldown(self, seconds: float = _HOTKEY_COOLDOWN_SEC):
@@ -131,6 +206,16 @@ class VoiceActivator:
                 self._noise_floor = raw_rms
             else:
                 self._noise_floor += 0.002 * (raw_rms - self._noise_floor)
+
+        if self._mode == "sleep" and self._kws is not None and not self._is_recording:
+            # Local wake engine: hand the block to the spotter and skip clip
+            # recording entirely — nothing is recorded or uploaded while asleep.
+            if not self._recorder.is_recording and now >= self._cooldown_until:
+                try:
+                    self._kws_q.put_nowait((samples.copy(), self._recorder._actual_rate))
+                except queue.Full:
+                    pass
+            return
 
         if self._mode == "sleep":
             # The wake gate is the HIGHEST of: the configured threshold, and the

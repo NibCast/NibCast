@@ -60,3 +60,9 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Exports & bundles from the dashboard — contain your dictation history
+nibcast_*.csv
+nibcast_*.pdf
+nibcast_backup*
+nibcast_debug*

@@ -16,6 +16,14 @@ pyobjc-framework-Quartz>=9.0; sys_platform == "darwin"
 pyobjc-framework-AppKit>=9.0; sys_platform == "darwin"
 
 # ── Optional ────────────────────────────────────────────────
+# Uncomment for In-app Whisper — fully offline speech-to-text inside NibCast
+# (Config → AI Backend → ASR → In-app ★ Offline). Uses an NVIDIA GPU if present.
+# faster-whisper>=1.0
+# Uncomment for the local wake-word engine (Config → Wake Word → Local keyword spotter):
+# sherpa-onnx>=1.10
+# sentencepiece>=0.2
+# Uncomment (Windows) for "pause music while dictating" and on-screen OCR for screen context:
+# winsdk>=1.0.0b10
 # Uncomment to use desktop_app.py for a native window dashboard
 # pywebview>=5.0
 # Uncomment for PDF history export (AGPL-3.0 — omitted from the prebuilt .exe;

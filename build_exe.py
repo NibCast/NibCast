@@ -55,6 +55,13 @@ _HIDDEN = [
     "PIL._tkinter_finder",
     "flask",
     "pyotp",
+    "local_asr",       # imported lazily (only when In-app Whisper / local models are used)
+    "local_models",
+    "hybrid",
+    "wake_engine",
+    "live_preview",
+    "media_control",
+    "screen_context",
 ]
 
 
@@ -234,6 +241,23 @@ def build(onefile: bool = False, clean: bool = False):
     # Collect all sounddevice DLLs (PortAudio)
     cmd += ["--collect-all", "sounddevice"]
     cmd += ["--collect-all", "pynput"]
+
+    # In-app Whisper is optional: bundle it (and its CTranslate2 runtime) only when
+    # faster-whisper is installed in the build environment. Adds ~100 MB; models
+    # still download on first use, so the exe stays usable offline after that.
+    import importlib.util as _ilu
+    if _ilu.find_spec("faster_whisper"):
+        print("  + bundling faster-whisper (In-app Whisper)")
+        cmd += ["--collect-all", "faster_whisper", "--collect-all", "ctranslate2",
+                "--collect-all", "tokenizers"]
+    # Same for the other optional extras: local wake engine (sherpa-onnx +
+    # sentencepiece) and Windows media/OCR bindings (winsdk).
+    for pkg, label in (("sherpa_onnx", "local wake engine"), ("sentencepiece", None),
+                       ("winsdk", "media pause + screen OCR")):
+        if _ilu.find_spec(pkg):
+            if label:
+                print(f"  + bundling {pkg} ({label})")
+            cmd += ["--collect-all", pkg]
 
     # Exclude PyMuPDF (AGPL-3.0) from the bundle — PDF export works fine when
     # users run from source with pymupdf installed; bundling it would require

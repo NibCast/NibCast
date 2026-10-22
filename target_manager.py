@@ -25,7 +25,24 @@ TARGET_RULES = {
         "add_period": False,
         "capitalize": False,
         "remove_fillers": False,
-        "llm_hint": "This may be code. Preserve technical terms.",
+        "llm_hint": "This may be code or Markdown. Preserve technical terms.",
+        "markdown": True,
+    },
+    # AI chat apps — checked before "browser" so ChatGPT/Claude in a browser tab
+    # (window title "ChatGPT - Google Chrome") still counts as a prompt.
+    "ai": {
+        "label": "🤖 AI Prompt",
+        "color": "#94e2d5",
+        "keywords": ["chatgpt", "claude", "gemini", "copilot", "perplexity", "deepseek",
+                     "le chat"],
+        "add_period": True,
+        "capitalize": True,
+        "remove_fillers": True,
+        "llm_hint": ("This is a prompt the speaker is writing TO an AI assistant. Keep it "
+                     "as their request in their own voice — never answer it. Keep every "
+                     "detail, constraint and example they gave; put multi-part requests "
+                     "as numbered points."),
+        "markdown": True,
     },
     "browser": {
         "label": "🌐 Browser",
@@ -35,6 +52,7 @@ TARGET_RULES = {
         "capitalize": True,
         "remove_fillers": True,
         "llm_hint": "Normal punctuation and formatting.",
+        "markdown": False,
     },
     "chat": {
         "label": "💬 Chat",
@@ -43,7 +61,9 @@ TARGET_RULES = {
         "add_period": False,
         "capitalize": True,
         "remove_fillers": True,
-        "llm_hint": "Conversational message, no trailing period.",
+        "llm_hint": ("Chat message: short, casual and direct, no trailing period. Keep names "
+                     "and @mentions exactly as said."),
+        "markdown": False,
     },
     "email": {
         "label": "📧 Email",
@@ -52,7 +72,11 @@ TARGET_RULES = {
         "add_period": True,
         "capitalize": True,
         "remove_fillers": True,
-        "llm_hint": "Professional email tone.",
+        "llm_hint": ("This is an email. Put a greeting the speaker said (e.g. \"Hi Sam,\") on "
+                     "its own line, the body in short paragraphs, and a sign-off they said "
+                     "(e.g. \"Thanks,\" + name) on its own lines. Never invent a greeting or "
+                     "sign-off. Professional, friendly tone."),
+        "markdown": False,
     },
     "notes": {
         "label": "📝 Notes",
@@ -61,7 +85,9 @@ TARGET_RULES = {
         "add_period": True,
         "capitalize": True,
         "remove_fillers": True,
-        "llm_hint": "Clear, structured sentences.",
+        "llm_hint": "Notes: clear, structured sentences; lists and tables welcome.",
+        "markdown": False,
+        "markdown_keywords": ["notion", "obsidian", "bear"],   # Word/Docs/Evernote paste pipes as text
     },
     "generic": {
         "label": "📄 Generic",
@@ -71,8 +97,31 @@ TARGET_RULES = {
         "capitalize": True,
         "remove_fillers": True,
         "llm_hint": "Clean up the text naturally.",
+        "markdown": False,
     },
 }
+
+# Detection order: specific apps first, then AI chat, then the generic browser.
+# Email/chat/notes win over "ai" so "Gmail - claude.smith@… - Chrome" or
+# "RE: Gemini launch - Outlook" stay emails; "ai" wins over "browser" so a
+# ChatGPT tab is still a prompt.
+_MATCH_ORDER = ("terminal", "vscode", "chat", "email", "notes", "ai", "browser")
+
+_MD_YES = " Markdown is supported here — use a Markdown table for tabular details."
+_MD_NO  = (" Plain text only — no Markdown tables, headings or **bold**; use numbered "
+           "lists (\"1. Item — detail\") for tabular details.")
+
+
+def _finish(rules: dict, category: str, window: str, keyword: str = "") -> dict:
+    """Copy a rule set for one detection and append the Markdown capability to
+    the LLM hint, so tables are only produced where they will render."""
+    out = rules.copy()
+    md = out.get("markdown", False) or keyword in out.get("markdown_keywords", ())
+    out["markdown"] = md
+    out["llm_hint"] = (out.get("llm_hint", "") + (_MD_YES if md else _MD_NO)).strip()
+    out["category"] = category
+    out["detected_window"] = window
+    return out
 
 _manual_override = ""
 _last_detected   = "generic"
@@ -97,6 +146,12 @@ def get_override() -> str:
 
 
 def _active_window_name() -> str:
+    """Lower-cased foreground window title (for keyword matching)."""
+    return active_window_title().lower()
+
+
+def active_window_title() -> str:
+    """Foreground window title with its original capitalisation."""
     try:
         if sys.platform == "win32":
             import ctypes
@@ -105,7 +160,7 @@ def _active_window_name() -> str:
             length = user32.GetWindowTextLengthW(hwnd)
             buf    = ctypes.create_unicode_buffer(length + 1)
             user32.GetWindowTextW(hwnd, buf, length + 1)
-            return buf.value.lower()
+            return buf.value
         elif sys.platform == "darwin":
             r = subprocess.run(
                 ["osascript", "-e",
@@ -113,13 +168,13 @@ def _active_window_name() -> str:
                  'application process whose frontmost is true'],
                 capture_output=True, text=True, timeout=2,
             )
-            return r.stdout.strip().lower()
+            return r.stdout.strip()
         else:
             r = subprocess.run(
                 ["xdotool", "getactivewindow", "getwindowname"],
                 capture_output=True, text=True, timeout=2,
             )
-            return r.stdout.strip().lower()
+            return r.stdout.strip()
     except Exception as e:
         log.warning(f"Window detection failed: {e}")
         return ""
@@ -129,17 +184,13 @@ def detect_target() -> dict:
     global _last_detected
 
     if _manual_override and _manual_override in TARGET_RULES:
-        rules = TARGET_RULES[_manual_override].copy()
-        rules["category"] = _manual_override
-        rules["detected_window"] = "Manual override"
         _last_detected = _manual_override
-        return rules
+        return _finish(TARGET_RULES[_manual_override], _manual_override, "Manual override")
 
     window = _active_window_name()
 
-    for category, rules in TARGET_RULES.items():
-        if category == "generic":
-            continue
+    for category in _MATCH_ORDER:
+        rules = TARGET_RULES[category]
         for kw in rules["keywords"]:
             # Word-boundary match so "code" doesn't match "Discord" /
             # "iCODE" / etc.  Multi-word keywords ("visual studio code")
@@ -150,18 +201,12 @@ def detect_target() -> dict:
             else:
                 if not re.search(r"\b" + re.escape(kw) + r"\b", window):
                     continue
-            rules_out = rules.copy()
-            rules_out["category"] = category
-            rules_out["detected_window"] = window[:60]
             _last_detected = category
             log.info(f"🎯 Auto-detected: {category} ({kw})")
-            return rules_out
+            return _finish(rules, category, window[:60], kw)
 
-    fallback = TARGET_RULES["generic"].copy()
-    fallback["category"] = "generic"
-    fallback["detected_window"] = window[:60] or "unknown"
     _last_detected = "generic"
-    return fallback
+    return _finish(TARGET_RULES["generic"], "generic", window[:60] or "unknown")
 
 
 def get_last_detected() -> str:

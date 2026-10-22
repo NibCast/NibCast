@@ -527,12 +527,21 @@ function renderLogTable() {
       }
     }
 
+    // Uncleaned badge — the LLM was skipped (rate limit, timeout, …) and the
+    // raw transcript was pasted with only basic capitalisation/punctuation.
+    const llmStatus = x.llm_status || '';
+    const uncleanedBadge = llmStatus.startsWith('basic:')
+      ? `<span title="LLM cleanup was skipped (${escHtml(llmStatus.slice(6).replace('_', ' '))}) — basic cleanup only. Set a fallback LLM in Config → AI Backend."
+          style="font-size:8px;letter-spacing:1px;color:#e8a525;border:1px solid rgba(232,165,37,0.45);
+          border-radius:2px;padding:1px 5px;margin-right:6px;vertical-align:middle">UNCLEANED</span>`
+      : '';
+
     return `<tr>
       <td class="log-time">${escHtml(dt.time)}<div class="log-date">${escHtml(dt.date)}</div></td>
       <td class="log-app" title="${escHtml(app)}">${escHtml(appShort)}</td>
       <td class="log-dur">${dur.toFixed(1)}s</td>
       <td><span class="tag ${escHtml(cat)}">${escHtml(cat).toUpperCase()}</span></td>
-      <td class="log-txt">${statusBadge}${fidelityBadge}${textHtml}</td>
+      <td class="log-txt">${statusBadge}${uncleanedBadge}${fidelityBadge}${textHtml}</td>
       <td style="white-space:nowrap">
         ${pasteBtn}
         <button class="copy-btn"  onclick="copyEntry(${id})"    title="Copy to clipboard">⎘</button>
@@ -874,6 +883,9 @@ function loadConfig() {
       if (d.GROQ_LLM_MODEL) setSelectValue('cfgGroqLlmModel', d.GROQ_LLM_MODEL);
       if (d.BRAIN_MODE !== undefined) setToggle('BRAIN_MODE', d.BRAIN_MODE);
       if (d.ASR_BRAIN_SECONDARY) setSelectValue('cfgBrainSecondary', d.ASR_BRAIN_SECONDARY);
+      // Show the hybrid engine only while hybrid is actually on, so saving the
+      // form can't silently opt in to a leftover secondary from an old config.
+      setSelectValue('cfgLlmBrainSecondary', d.LLM_HYBRID ? (d.LLM_BRAIN_SECONDARY || '') : '');
       if (d.OPENAI_API_KEY_MASKED) {
         const e = document.getElementById('cfgOpenaiKey');
         if (e) e.placeholder = 'Current: ' + d.OPENAI_API_KEY_MASKED;
@@ -896,6 +908,9 @@ function loadConfig() {
       }
       if (d.GEMINI_LLM_MODEL) setSelectValue('cfgGeminiLlmModel', d.GEMINI_LLM_MODEL);
       if (d.OLLAMA_BASE_URL) { const e = document.getElementById('cfgOllamaUrl'); if (e) e.value = d.OLLAMA_BASE_URL; }
+      { const e = document.getElementById('cfgOfflineMode'); if (e) e.checked = !!d.OFFLINE_MODE; }
+      { const e = document.getElementById('cfgLocalWhisperDevice'); if (e && d.LOCAL_WHISPER_DEVICE) e.value = d.LOCAL_WHISPER_DEVICE; }
+      refreshLocalWhisper(d.LOCAL_WHISPER_MODEL);
       if (d.OLLAMA_LLM_MODEL) { const e = document.getElementById('cfgOllamaModel'); if (e) e.value = d.OLLAMA_LLM_MODEL; }
       if (d.LOCAL_ASR_URL) { const e = document.getElementById('cfgLocalAsrUrl'); if (e) e.value = d.LOCAL_ASR_URL; }
       if (d.LOCAL_ASR_MODEL) { const e = document.getElementById('cfgLocalAsrModel'); if (e) e.value = d.LOCAL_ASR_MODEL; }
@@ -928,6 +943,18 @@ function loadConfig() {
       if (legacyWW) legacyWW.value = wakeVal;
       const inlineWW = document.getElementById('cfgWakeWordInline');
       if (inlineWW) inlineWW.value = wakeVal;
+      { const e = document.getElementById('cfgLivePreview');   if (e) e.value = d.LIVE_PREVIEW || 'auto'; }
+      { const e = document.getElementById('cfgPauseMedia');    if (e) e.checked = !!d.PAUSE_MEDIA_WHILE_DICTATING; }
+      { const e = document.getElementById('cfgScreenContext'); if (e) e.checked = !!d.SCREEN_CONTEXT; }
+      refreshExtrasStatus();
+      { const e = document.getElementById('cfgMousePtt');     if (e) e.value = d.MOUSE_PTT_BUTTON || ''; }
+      { const e = document.getElementById('cfgMousePttMode'); if (e) e.value = d.MOUSE_PTT_MODE || 'hold'; }
+      { const e = document.getElementById('cfgDoubleTap');    if (e) e.value = d.DOUBLE_TAP_KEY || ''; }
+      { const e = document.getElementById('cfgWakeEngine'); if (e) e.value = d.WAKE_ENGINE || 'asr'; }
+      { const e = document.getElementById('cfgWakeKwsSens'); if (e && d.WAKE_KWS_SENSITIVITY !== undefined) e.value = d.WAKE_KWS_SENSITIVITY; }
+      refreshWakeEngine();
+      const altWW = document.getElementById('cfgWakeAlternatives');
+      if (altWW && Array.isArray(d.WAKE_WORD_ALTERNATIVES)) altWW.value = d.WAKE_WORD_ALTERNATIVES.join('\n');
       if (d.WAKE_WORD_VAD_THRESHOLD !== undefined) {
         const wt = document.getElementById('cfgVadThreshold');
         const wv = document.getElementById('cfgVadThresholdVal');
@@ -1270,6 +1297,7 @@ function saveConfig() {
 
   cfg.BRAIN_MODE = _cfgToggles.BRAIN_MODE;
   cfg.ASR_BRAIN_SECONDARY = document.getElementById('cfgBrainSecondary')?.value || 'openai';
+  { const e = document.getElementById('cfgLlmBrainSecondary'); if (e) cfg.LLM_BRAIN_SECONDARY = e.value; }
 
   const openaiKey = document.getElementById('cfgOpenaiKey')?.value.trim();
   if (openaiKey) cfg.OPENAI_API_KEY = openaiKey;
@@ -1290,6 +1318,9 @@ function saveConfig() {
   cfg.CEREBRAS_LLM_MODEL = document.getElementById('cfgCerebrasLlmModel')?.value || 'llama-3.3-70b';
   cfg.GEMINI_LLM_MODEL = document.getElementById('cfgGeminiLlmModel')?.value || 'gemini-2.5-flash';
   cfg.OLLAMA_BASE_URL  = document.getElementById('cfgOllamaUrl')?.value?.trim() || '';
+  { const e = document.getElementById('cfgOfflineMode'); if (e) cfg.OFFLINE_MODE = e.checked; }
+  { const e = document.getElementById('cfgLocalWhisperModel'); if (e && e.value) cfg.LOCAL_WHISPER_MODEL = e.value; }
+  { const e = document.getElementById('cfgLocalWhisperDevice'); if (e) cfg.LOCAL_WHISPER_DEVICE = e.value; }
   cfg.OLLAMA_LLM_MODEL = document.getElementById('cfgOllamaModel')?.value?.trim() || '';
   cfg.LOCAL_ASR_URL   = document.getElementById('cfgLocalAsrUrl')?.value?.trim() || '';
   cfg.LOCAL_ASR_MODEL = document.getElementById('cfgLocalAsrModel')?.value?.trim() || '';
@@ -1308,6 +1339,16 @@ function saveConfig() {
   cfg.WAKE_WORD = (document.getElementById('cfgWakeWordInline')?.value?.trim()
                || document.getElementById('cfgWakeWord')?.value?.trim()
                || '');
+  { const e = document.getElementById('cfgLivePreview');   if (e) cfg.LIVE_PREVIEW = e.value; }
+  { const e = document.getElementById('cfgPauseMedia');    if (e) cfg.PAUSE_MEDIA_WHILE_DICTATING = e.checked; }
+  { const e = document.getElementById('cfgScreenContext'); if (e) cfg.SCREEN_CONTEXT = e.checked; }
+  { const e = document.getElementById('cfgMousePtt');     if (e) cfg.MOUSE_PTT_BUTTON = e.value; }
+  { const e = document.getElementById('cfgMousePttMode'); if (e) cfg.MOUSE_PTT_MODE = e.value; }
+  { const e = document.getElementById('cfgDoubleTap');    if (e) cfg.DOUBLE_TAP_KEY = e.value; }
+  { const e = document.getElementById('cfgWakeEngine'); if (e) cfg.WAKE_ENGINE = e.value; }
+  { const e = document.getElementById('cfgWakeKwsSens'); if (e) cfg.WAKE_KWS_SENSITIVITY = parseFloat(e.value); }
+  const _wwAlt = document.getElementById('cfgWakeAlternatives');
+  if (_wwAlt) cfg.WAKE_WORD_ALTERNATIVES = _wwAlt.value.split('\n').map(s => s.trim()).filter(Boolean);
   const _wwThr = document.getElementById('cfgVadThreshold');
   if (_wwThr) cfg.WAKE_WORD_VAD_THRESHOLD = parseFloat(_wwThr.value);
   const _autoRaise = document.getElementById('cfgAutoRaise');
@@ -1875,6 +1916,180 @@ async function testWakePhrase() {
 }
 function escHtml(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// In-app Whisper: fill the model list and show install / download / ready state.
+let _lwPoll = null;
+async function refreshLocalWhisper(selected) {
+  const sel = document.getElementById('cfgLocalWhisperModel');
+  const box = document.getElementById('localWhisperStatus');
+  if (!sel || !box) return;
+  try {
+    const d = await (await fetch('/api/local-asr')).json();
+    if (!sel.options.length) {
+      sel.innerHTML = Object.entries(d.models).map(([k, v]) =>
+        `<option value="${escHtml(k)}">${escHtml(k)} — ${escHtml(v)}</option>`).join('');
+    }
+    if (selected) sel.value = selected;
+    _renderLocalWhisper(d);
+  } catch (e) { box.textContent = ''; }
+}
+
+function _renderLocalWhisper(d) {
+  const box = document.getElementById('localWhisperStatus');
+  if (!box) return;
+  const msg = {
+    unavailable: '⚠ Not installed — run  pip install faster-whisper  then restart NibCast.',
+    idle:    'Not loaded yet — click DOWNLOAD / LOAD (first time downloads the model).',
+    loading: `⟳ Loading ${d.model} on ${d.device}… (first time downloads it — can take a few minutes)`,
+    ready:   `✓ Ready — ${d.model} on ${d.device} (loaded in ${d.load_sec}s)`,
+    error:   '✕ ' + (d.error || 'failed to load'),
+  }[d.available ? d.state : 'unavailable'] || '';
+  box.textContent = msg;
+  box.style.color = d.state === 'ready' ? 'var(--vf-cyan)' : d.state === 'error' || !d.available ? '#ff6b6b' : 'var(--vf-muted)';
+  clearTimeout(_lwPoll);
+  if (d.state === 'loading') _lwPoll = setTimeout(() => refreshLocalWhisper(), 2000);
+}
+
+async function loadLocalWhisper() {
+  const model = document.getElementById('cfgLocalWhisperModel')?.value || '';
+  try {
+    const r = await fetch('/api/local-asr', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                                              body: JSON.stringify({model}) });
+    const d = await r.json();
+    _renderLocalWhisper({...d, state: d.available ? 'loading' : 'unavailable', model});
+  } catch (e) { alert('Load failed: ' + e); }
+}
+
+// Find LLM servers running on this PC and offer one-click "use" buttons.
+async function detectLocalModels() {
+  const box = document.getElementById('localModelsResult');
+  if (!box) return;
+  box.textContent = 'Looking for local servers…'; box.style.color = 'var(--vf-muted)';
+  try {
+    const d = await (await fetch('/api/local-models')).json();
+    if (!d.servers || !d.servers.length) {
+      box.innerHTML = 'No local model server found. Install <b>Ollama</b> (ollama.com) and run ' +
+        '<code style="color:var(--vf-pri)">ollama pull qwen2.5:7b</code>, or start LM Studio\'s server, then detect again.';
+      return;
+    }
+    box.style.color = 'var(--vf-text)';
+    box.innerHTML = d.servers.map(sv => {
+      const head = `<b>${escHtml(sv.name)}</b> <span style="color:var(--vf-muted)">${escHtml(sv.base_url)}</span>`;
+      if (!sv.models.length) return head + ' — running, but no chat models loaded.';
+      return head + '<br>' + sv.models.slice(0, 8).map((m, i) => {
+        const cur = d.current.base_url === sv.base_url && d.current.model === m;
+        const tag = cur ? (d.current.backend === 'ollama' ? ' ✓ primary' : d.current.fallback === 'ollama' ? ' ✓ fallback' : '') : '';
+        return `<span style="display:inline-block;margin:2px 10px 2px 0">${escHtml(m)}${i === 0 ? ' <span style="color:var(--vf-cyan)">(suggested)</span>' : ''}${tag}
+          <button class="btn-ghost" style="padding:1px 6px;font-size:9px" data-url="${escHtml(sv.base_url)}" data-model="${escHtml(m)}" onclick="useLocalModel(this,'primary')">USE</button>
+          <button class="btn-ghost" style="padding:1px 6px;font-size:9px" data-url="${escHtml(sv.base_url)}" data-model="${escHtml(m)}" onclick="useLocalModel(this,'fallback')">AS FALLBACK</button>
+          <button class="btn-ghost" style="padding:1px 6px;font-size:9px" data-url="${escHtml(sv.base_url)}" data-model="${escHtml(m)}" onclick="useLocalModel(this,'hybrid')" title="Clean every dictation with your cloud LLM AND this model at once; keep the better text">AS HYBRID</button></span>`;
+      }).join('');
+    }).join('<br>');
+  } catch (e) {
+    box.textContent = 'Detect failed: ' + e; box.style.color = '#ff6b6b';
+  }
+}
+
+async function useLocalModel(btn, role) {
+  try {
+    const r = await fetch('/api/local-models/use', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({base_url: btn.dataset.url, model: btn.dataset.model, role})
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'failed');
+    const u = document.getElementById('cfgOllamaUrl');   if (u) u.value = d.base_url;
+    const m = document.getElementById('cfgOllamaModel'); if (m) m.value = d.model;
+    if (role === 'primary') setLlmBackend('ollama');
+    else if (role === 'fallback') { const f = document.getElementById('cfgLlmFallback'); if (f) f.value = 'ollama'; }
+    else { setSelectValue('cfgLlmBrainSecondary', 'ollama'); }
+    showToast(`Local model ${d.model} set as ${role} — warming it up`);
+    detectLocalModels();
+  } catch (e) {
+    alert('Could not use local model: ' + e.message);
+  }
+}
+
+// Tell the user which optional helper each "while you dictate" extra needs.
+async function refreshExtrasStatus() {
+  try {
+    const d = await (await fetch('/api/extras-status')).json();
+    const m = document.getElementById('extrasMediaNote');
+    const o = document.getElementById('extrasOcrNote');
+    const need = d.windows ? '(needs  pip install winsdk)' : '(Windows only)';
+    if (m) m.textContent = d.media_control ? '' : need;
+    if (o) o.textContent = d.screen_ocr ? '' : (d.windows ? '— window title only; pip install winsdk for on-screen text' : '— window title only');
+  } catch (e) {}
+}
+
+// Local wake engine: show install / download / ready state.
+let _wePoll = null;
+async function refreshWakeEngine() {
+  const box = document.getElementById('wakeEngineStatus');
+  const btn = document.getElementById('btnWakeModel');
+  const row = document.getElementById('wakeKwsRow');
+  const kws = (document.getElementById('cfgWakeEngine')?.value || 'asr') === 'kws';
+  if (row) row.style.display = kws ? 'flex' : 'none';
+  if (btn) btn.style.display = kws ? '' : 'none';
+  if (!box) return;
+  if (!kws) { box.textContent = 'Wake clips are checked by your speech-recognition backend.'; box.style.color = 'var(--vf-muted)'; return; }
+  try {
+    const d = await (await fetch('/api/wake-engine')).json();
+    let msg, col = 'var(--vf-muted)';
+    if (!d.available) { msg = '⚠ Not installed — run  pip install sherpa-onnx sentencepiece  then restart NibCast.'; col = '#ff6b6b'; }
+    else if (d.state === 'downloading') msg = `⟳ Downloading model… ${d.progress}%`;
+    else if (d.state === 'error') { msg = '✕ ' + d.error; col = '#ff6b6b'; }
+    else if (d.model_ready) { msg = '✓ Model ready — save to switch the wake word to the local engine.'; col = 'var(--vf-cyan)'; }
+    else msg = 'Model not downloaded yet — click DOWNLOAD MODEL (~17 MB, once).';
+    box.textContent = msg; box.style.color = col;
+    if (btn) btn.style.display = d.model_ready ? 'none' : '';
+    clearTimeout(_wePoll);
+    if (d.state === 'downloading') _wePoll = setTimeout(refreshWakeEngine, 1000);
+  } catch (e) { box.textContent = ''; }
+}
+
+async function downloadWakeModel() {
+  try { await fetch('/api/wake-engine', { method: 'POST' }); } catch (e) {}
+  setTimeout(refreshWakeEngine, 300);
+}
+
+// Rank discarded wake clips that sound like the wake phrase ("noba" for
+// "hey nova") so the user can accept them as alternatives in one click.
+async function suggestWakeAlternatives() {
+  const box = document.getElementById('wakeAltSuggest');
+  if (!box) return;
+  box.textContent = 'Searching history…'; box.style.color = 'var(--vf-muted)';
+  try {
+    const r = await fetch('/api/wake-alternatives/suggest');
+    const d = await r.json();
+    if (!d.ok) { box.textContent = d.error || 'Unavailable'; return; }
+    if (!d.suggestions.length) {
+      box.textContent = d.privacy_mode
+        ? 'Privacy Mode is on, so discarded clips have no text to learn from.'
+        : 'No repeated mishears found — the wake phrase is being heard correctly.';
+      return;
+    }
+    box.style.color = 'var(--vf-text)';
+    box.innerHTML = 'Heard instead of <b>' + escHtml(d.wake_word) + '</b> (click to accept, then SAVE): ' +
+      d.suggestions.map(s =>
+        `<button class="btn-ghost" data-alt="${escHtml(s.text)}" onclick="addWakeAlternative(this)"
+          style="padding:2px 8px;font-size:9px;margin:2px 4px 2px 0">${escHtml(s.text)} ×${s.count}</button>`
+      ).join('');
+  } catch (e) {
+    box.textContent = 'Suggest failed: ' + e; box.style.color = '#ff6b6b';
+  }
+}
+
+function addWakeAlternative(btn) {
+  const ta = document.getElementById('cfgWakeAlternatives');
+  const alt = btn.dataset.alt;
+  if (!ta || !alt) return;
+  const cur = ta.value.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!cur.includes(alt)) cur.push(alt);
+  ta.value = cur.join('\n');
+  btn.remove();
+  markUnsaved();
+}
+
 // Populate per-mode hotkey chips inside the mode cards using global _hotkeys
 function _renderModeHotkeys() {
   const fmt = c => c.replace(/<([^>]+)>/g, (_, k) => k.toUpperCase()).replace(/\+/g, ' + ');
@@ -1967,7 +2182,7 @@ function setAsrBackend(backend) {
   document.querySelectorAll('#asrBackendPills .backend-pill').forEach(b => {
     b.classList.toggle('active', b.dataset.backend === backend);
   });
-  const sections = ['groq', 'deepgram', 'nvidia', 'openai', 'local', 'custom'];
+  const sections = ['groq', 'deepgram', 'nvidia', 'openai', 'faster_whisper', 'local', 'custom'];
   sections.forEach(s => {
     document.querySelectorAll(`.asr-${s}-fields`).forEach(el => {
       el.style.display = s === backend ? '' : 'none';

@@ -19,7 +19,7 @@ import sys
 import ctypes
 import time
 import threading
-from pynput import keyboard
+from pynput import keyboard, mouse
 import config
 import state
 from logger import log
@@ -124,6 +124,79 @@ def _key_to_name(key) -> str:
     return ""
 
 
+# ── Double-tap detector ──────────────────────────────────────
+# "Tap Right Ctrl twice" toggles dictation — one hand, no chord, and it can't
+# fire while typing a shortcut: any other key pressed during or between the
+# taps cancels the sequence, and a tap held too long isn't a tap.
+
+class DoubleTap:
+    TAP_MAX_SEC = 0.30    # longest press that still counts as a tap
+    GAP_MAX_SEC = 0.40    # longest gap between the two taps
+
+    def __init__(self):
+        self._down_at  = None
+        self._dirty    = False
+        self._last_tap = 0.0
+
+    def press(self, key_name: str, target: str, now: float):
+        if not target:
+            return
+        # On AltGr layouts Windows injects a Left-Ctrl press before every Right
+        # Alt press — that fake key must not cancel a Right-Alt double-tap.
+        if target == "alt_r" and key_name in ("ctrl_l", "ctrl"):
+            return
+        if key_name == target:
+            if self._down_at is None:       # ignore OS key-repeat while held
+                self._down_at = now
+                self._dirty = False
+        else:
+            self._dirty = True              # chord or typing — not a double-tap
+            self._last_tap = 0.0
+
+    def release(self, key_name: str, target: str, now: float) -> bool:
+        """Returns True when this release completes a double-tap."""
+        if not target or key_name != target or self._down_at is None:
+            return False
+        held, self._down_at = now - self._down_at, None
+        if self._dirty or held > self.TAP_MAX_SEC:
+            self._dirty, self._last_tap = False, 0.0
+            return False
+        if self._last_tap and now - self._last_tap <= self.GAP_MAX_SEC:
+            self._last_tap = 0.0
+            return True
+        self._last_tap = now
+        return False
+
+
+def _raw_key_name(key) -> str:
+    """Side-specific name ('ctrl_r', 'alt_r', 'caps_lock') for double-tap keys."""
+    try:
+        if isinstance(key, keyboard.Key):
+            name = key.name.lower()
+            return "alt_r" if name == "alt_gr" else name   # Right Alt is AltGr on many layouts
+    except Exception:
+        pass
+    return ""
+
+
+# Mouse buttons usable as push-to-talk. X1/X2 are the thumb "back"/"forward"
+# side buttons; their normal action is suppressed on Windows while assigned,
+# so holding one to talk doesn't also navigate the browser back.
+_MOUSE_BUTTONS = {"x1": "x1", "x2": "x2", "middle": "middle"}
+_WM_MBUTTONDOWN, _WM_MBUTTONUP = 0x0207, 0x0208
+_WM_XBUTTONDOWN, _WM_XBUTTONUP = 0x020B, 0x020C
+_MOUSE_COMBO  = "__mouse__"
+_DOUBLE_COMBO = "__doubletap__"
+
+_instance = None   # the running listener, for refresh_pointer_triggers()
+
+
+def refresh_pointer_triggers():
+    """Apply MOUSE_PTT_* / DOUBLE_TAP_KEY changes without a restart."""
+    if _instance is not None:
+        _instance.refresh_extras()
+
+
 class HotkeyListener:
     def __init__(self, on_press_cb, on_release_cb,
                  on_command_press_cb=None, on_command_release_cb=None):
@@ -139,12 +212,21 @@ class HotkeyListener:
         self._pressed               = set()   # names of currently-held keys
         self._listener              = None
         self._last_toggle_at        = {}      # combo → epoch time of last accepted toggle event
+        self._combos                = {}
+        self._sorted_combos         = []
+        self._double_tap            = DoubleTap()
+        self._mouse_listener        = None
+        self._mouse_button          = ""
 
     # ── Lifecycle ─────────────────────────────────────────────
 
     def start(self):
+        global _instance
+        if _instance is not None and _instance is not self:
+            _instance.stop()          # watchdog restart: don't leave a second mouse hook running
+        _instance = self
         raw = list(config.HOTKEY_COMBOS or [])
-        if not raw:
+        if not raw and not (getattr(config, "MOUSE_PTT_BUTTON", "") or getattr(config, "DOUBLE_TAP_KEY", "")):
             log.warning("No hotkeys configured — open Settings to set one.")
             return
 
@@ -170,6 +252,7 @@ class HotkeyListener:
         )
 
         log.info(f"⌨️  Hotkey listener started — {len(self._combos)} combo(s)")
+        self.refresh_extras()
 
         self._listener = keyboard.Listener(
             on_press=self._on_press,
@@ -180,15 +263,90 @@ class HotkeyListener:
         self._listener.join()
 
     def stop(self):
-        if self._listener:
+        for lst in (self._listener, self._mouse_listener):
+            if lst:
+                try:
+                    lst.stop()
+                except Exception:
+                    pass
+
+    # ── Mouse button + double-tap triggers ────────────────────
+
+    def refresh_extras(self):
+        """(Re)register the synthetic mouse / double-tap combos from config and
+        start or stop the mouse hook to match. The mouse hook only runs while a
+        button is assigned — a global hook sees every mouse move."""
+        mode = getattr(config, "MOUSE_PTT_MODE", "hold")
+        self._combos[_MOUSE_COMBO]  = {"tokens": frozenset({"mouse_btn"}),
+                                       "recordMode": "toggle" if mode == "toggle" else "hold"}
+        self._combos[_DOUBLE_COMBO] = {"tokens": frozenset(), "recordMode": "toggle"}
+        dt = getattr(config, "DOUBLE_TAP_KEY", "")
+        if dt:
+            log.info(f"  ✅ Double-tap: {dt} → toggle dictation")
+
+        button = _MOUSE_BUTTONS.get(getattr(config, "MOUSE_PTT_BUTTON", "") or "", "")
+        if button == self._mouse_button:
+            return
+        if self._mouse_listener:
             try:
-                self._listener.stop()
+                self._mouse_listener.stop()
             except Exception:
                 pass
+            self._mouse_listener = None
+        self._mouse_button = button
+        if not button:
+            return
+        try:
+            kw = {"on_click": self._on_click}
+            holder = []            # the filter needs ITS listener, even after a swap
+            if _IS_WINDOWS:
+                kw["win32_event_filter"] = lambda msg, data: self._win32_mouse_filter(msg, data, holder, button)
+            self._mouse_listener = mouse.Listener(**kw)
+            holder.append(self._mouse_listener)
+            self._mouse_listener.daemon = True
+            self._mouse_listener.start()
+            log.info(f"  ✅ Mouse button {button} → {mode} to talk")
+        except Exception as e:
+            self._mouse_listener = None
+            self._mouse_button = ""
+            log.warning(f"🖱️  Mouse trigger failed to start: {e}")
+
+    def _mouse_event(self, pressed: bool):
+        if pressed:
+            self._fire_press(_MOUSE_COMBO)
+        else:
+            self._release_name("mouse_btn")
+
+    def _on_click(self, x, y, button, pressed):
+        if getattr(button, "name", "") == self._mouse_button:
+            self._mouse_event(pressed)
+
+    def _win32_mouse_filter(self, msg, data, holder, b):
+        """Handle the assigned button here and swallow it, so its normal action
+        (browser Back/Forward, middle-click paste/new tab) doesn't also run.
+        Must stay fast — it runs inside the OS mouse hook. `holder`/`b` are this
+        hook's own listener and button, so a concurrent refresh can't pull them
+        out from under an in-flight event."""
+        if not holder or b != self._mouse_button:
+            return True            # a replaced hook still draining — let the click through
+        if msg in (_WM_XBUTTONDOWN, _WM_XBUTTONUP):
+            which = "x1" if (data.mouseData >> 16) & 0xFFFF == 1 else "x2"
+            if which != b:
+                return True
+            pressed = msg == _WM_XBUTTONDOWN
+        elif msg in (_WM_MBUTTONDOWN, _WM_MBUTTONUP) and b == "middle":
+            pressed = msg == _WM_MBUTTONDOWN
+        else:
+            return True
+        self._mouse_event(pressed)
+        holder[0].suppress_event()              # raises — the OS never sees the click
+        return False                            # (if it didn't: don't re-deliver to _on_click)
 
     # ── Raw key events ────────────────────────────────────────
 
     def _on_press(self, key):
+        self._double_tap.press(_raw_key_name(key) or _key_to_name(key),
+                               getattr(config, "DOUBLE_TAP_KEY", ""), time.time())
         name = _key_to_name(key)
         if not name:
             return
@@ -212,8 +370,12 @@ class HotkeyListener:
                 return
 
     def _on_release(self, key):
-        name = _key_to_name(key)
+        if self._double_tap.release(_raw_key_name(key) or _key_to_name(key),
+                                    getattr(config, "DOUBLE_TAP_KEY", ""), time.time()):
+            self._fire_press(_DOUBLE_COMBO)
+        self._release_name(_key_to_name(key))
 
+    def _release_name(self, name: str):
         # Single lock: read combo_tokens, check, and clear active state atomically.
         # The original two-lock design had a race window between releasing the first
         # lock and re-acquiring it: a new press could set _active=True in that gap,

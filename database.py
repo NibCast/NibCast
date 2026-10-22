@@ -22,7 +22,7 @@ def _conn():
     return c
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _get_user_version(db) -> int:
@@ -65,6 +65,15 @@ def _migrate(db):
         if not col_exists:
             db.execute("ALTER TABLE transcriptions ADD COLUMN error TEXT DEFAULT ''")
         _set_user_version(db, 2)
+    if v < 3:
+        # How the text was cleaned: "llm", "fallback:<backend>", "off", or
+        # "basic:<reason>" when the LLM was skipped (rate_limited, timeout, …).
+        # Before this column, a skipped cleanup was indistinguishable from a
+        # real one — months of uncleaned pastes went unnoticed.
+        cols = {row[1] for row in db.execute("PRAGMA table_info(transcriptions)").fetchall()}
+        if "llm_status" not in cols:
+            db.execute("ALTER TABLE transcriptions ADD COLUMN llm_status TEXT DEFAULT ''")
+        _set_user_version(db, 3)
 
 
 def init_db():
@@ -76,17 +85,22 @@ def init_db():
 def save_transcription(raw_text: str, clean_text: str, duration_sec: float = 0.0,
                        target_app: str = "Unknown", category: str = "generic",
                        language: str = "en", status: str = "success",
-                       error: str = ""):
+                       error: str = "", llm_status: str = ""):
     wc = len(clean_text.split()) if clean_text else 0
     cc = len(clean_text)
+    # Privacy Mode: keep the counts (usage stats still work) but never store
+    # what was said — neither the dictation nor overheard wake-word clips.
+    from config import PRIVACY_MODE as _private   # read live: toggled at runtime
+    if _private:
+        raw_text = clean_text = ""
     with _conn() as db:
         db.execute(
             """INSERT INTO transcriptions
                (raw_text, clean_text, duration_sec, word_count, char_count,
-                target_app, category, language, status, error)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                target_app, category, language, status, error, llm_status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (raw_text, clean_text, duration_sec, wc, cc, target_app, category,
-             language, status, error)
+             language, status, error, llm_status)
         )
     log.info(f"💾 Saved: {wc} words | {target_app}")
     if status == "success":
@@ -159,6 +173,7 @@ def export_csv(mode: str = "user") -> str:
             ("clean_text",   "Transcription (Clean)"),
             ("raw_text",     "Raw Speech"),
             ("llm_changed",  "LLM Cleaned"),
+            ("llm_status",   "LLM Status"),
             ("word_count",   "Words"),
             ("char_count",   "Chars"),
             ("duration_sec", "Duration (s)"),
@@ -462,3 +477,51 @@ def get_insights() -> dict:
         "streak":        streak,
         "longest_streak": max_streak,
     }
+
+# ── Wake-word mishear suggestions ─────────────────────────────
+# Whisper hears some wake phrases the same wrong way again and again ("hey
+# nova" → "noba", "nova", "hey noba"). Each of those was discarded as
+# "wake word not found" even though it was the user saying the phrase. The
+# discarded history already holds the evidence, so rank the short, repeated
+# transcripts that sound like the phrase's content word and let the user
+# accept them as WAKE_WORD_ALTERNATIVES with one click.
+
+def _norm_phrase(s: str) -> str:
+    return " ".join(re.sub(r"[^\w\s']", " ", (s or "").lower()).split())
+
+
+def rank_wake_alternatives(texts, wake_word: str, existing=(),
+                           min_count: int = 3, limit: int = 8) -> list:
+    """Return [{"text", "count", "similarity"}] for repeated short transcripts
+    that resemble the wake phrase. Pure function — `texts` is any iterable of
+    discarded wake-clip transcripts."""
+    import difflib
+    ww = _norm_phrase(wake_word).split()
+    if not ww:
+        return []
+    content = ww[-1]           # "nova" in "hey nova" — the discriminative word
+    skip = {_norm_phrase(e) for e in existing} | {" ".join(ww)}
+    counts = Counter(_norm_phrase(t) for t in texts if t)
+    out = []
+    for text, n in counts.items():
+        words = text.split()
+        if n < min_count or not 1 <= len(words) <= len(ww) + 1 or text in skip:
+            continue
+        # Every candidate must contain a word that sounds like the content word;
+        # the interjection alone ("hey") or short noise ("h", "the") never counts.
+        sim = max(difflib.SequenceMatcher(None, w, content).ratio() for w in words)
+        if sim < 0.65 or max(len(w) for w in words) < 3:
+            continue
+        out.append({"text": text, "count": n, "similarity": round(sim, 2)})
+    out.sort(key=lambda d: (-d["count"], -d["similarity"]))
+    return out[:limit]
+
+
+def suggest_wake_alternatives(wake_word: str, existing=(), limit: int = 8) -> list:
+    with _conn() as db:
+        rows = db.execute(
+            "SELECT raw_text FROM transcriptions WHERE status='discarded' "
+            "AND raw_text != '' ORDER BY id DESC LIMIT 5000"
+        ).fetchall()
+    return rank_wake_alternatives((r["raw_text"] for r in rows), wake_word,
+                                  existing=existing, limit=limit)

@@ -14,6 +14,8 @@
 #  receives the complete "hey voice" rather than a clipped "voice".
 # ============================================================
 
+from __future__ import annotations
+
 import io
 import time
 import wave
@@ -120,6 +122,18 @@ class AudioRecorder:
             return b""
         return self._frames_to_wav()
 
+    def snapshot_wav(self, last_sec: float | None = None) -> bytes:
+        """WAV of the audio recorded so far (optionally only the last `last_sec`
+        seconds) WITHOUT stopping — used by the live preview."""
+        with self._lock:
+            if not self._recording or not self._frames:
+                return b""
+            frames = list(self._frames)
+        if last_sec:
+            keep = max(1, int(last_sec * self._actual_rate / _BLOCKSIZE))
+            frames = frames[-keep:]
+        return self._to_wav(frames)
+
     # ── Internal ──────────────────────────────────────────────
 
     def _open_stream(self, log_open=True):
@@ -207,7 +221,13 @@ class AudioRecorder:
                 self._preroll.append(data)
 
     def _frames_to_wav(self) -> bytes:
-        audio_int16 = np.concatenate(self._frames, axis=0)
+        data = self._to_wav(self._frames)
+        log.info(f"📦 WAV created — {len(data) / 1024:.1f} KB "
+                 f"@ {self._actual_rate} Hz")
+        return data
+
+    def _to_wav(self, frames) -> bytes:
+        audio_int16 = np.concatenate(frames, axis=0)
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
             wf.setnchannels(config.CHANNELS)
@@ -215,8 +235,6 @@ class AudioRecorder:
             wf.setframerate(self._actual_rate)
             wf.writeframes(audio_int16.tobytes())
         buf.seek(0)
-        log.info(f"📦 WAV created — {buf.getbuffer().nbytes / 1024:.1f} KB "
-                 f"@ {self._actual_rate} Hz")
         return buf.read()
 
 

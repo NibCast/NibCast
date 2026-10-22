@@ -19,19 +19,80 @@ Press a hotkey (or say a wake phrase) → speak → your words appear in any app
 
 ---
 
+## 🆕 What's New (v2.4.3 → v2.7.0)
+
+These releases were driven by real daily-use history: many dictations were being
+silently pasted *without* LLM cleanup, and most wake-word triggers were false.
+Everything below fixes that — and makes NibCast
+work **fully offline with no API keys** if you want it to. Full details in
+[CHANGELOG.md](CHANGELOG.md).
+
+### Cleaner, paste-ready text
+- **No more silent "uncleaned" pastes** — rate-limited (HTTP 429) cleanup is retried, then sent to your fallback LLM. Anything that still skips the LLM gets an amber **UNCLEANED** badge in the Log, with the reason recorded.
+- **Grammatical output** — fillers ("um", "kind of", "you know"), padding sentences ("So yeah."), stutters ("I I"), doubled words ("updated updated"), false starts ("If you… I was… I'm…") and self-corrections ("Tuesday, no, Friday") are removed, and grammar is fixed.
+- **Formatted the way you speak** — spoken lists and "first… second… third…" become `1. 2. 3.` lists; items that share details (plans with prices, days with tasks) become a **table** in apps that show Markdown. Numbered lists still work when the LLM is skipped.
+- **Per-app formatting** — new **AI Prompt** mode for ChatGPT / Claude / Gemini / Copilot (keeps your request in your own words, never answers it), proper **email** layout (greeting, paragraphs, sign-off), short **chat** messages.
+- **Hybrid cloud + local** — run your cloud LLM and a local one at the same time and keep the better text; the first good answer wins after 1.5 s, so it stays fast.
+
+### Local & offline — no API keys needed
+- **In-app Whisper** — speech-to-text runs *inside* NibCast (no server to start), on your NVIDIA GPU if you have one.
+- **DETECT LOCAL MODELS** — finds Ollama, LM Studio, llama.cpp, Jan or LocalAI on your PC and uses one as your cleanup engine, fallback or hybrid partner in one click.
+- **Offline Mode** — a hard switch: audio and text never leave your PC.
+
+### A wake word that actually works
+- **Local wake-word engine** — listens for your phrase on your PC with a tiny model (~17 MB, no training). Instant, offline, and nothing is recorded or uploaded while it waits.
+- **Learns your mishears** — **SUGGEST FROM HISTORY** finds how speech recognition keeps mishearing your phrase (e.g. "hey nova" → *noba*) and lets you accept them in one click.
+- Saying the wake phrase twice no longer pastes it as text.
+
+### Easier ways to start
+- **Mouse push-to-talk** — hold a mouse thumb button (or the middle button) to talk.
+- **Double-tap to dictate** — tap Right Ctrl / Right Alt / Right Shift / Caps Lock twice to start, twice to paste.
+- **Live text** — a caption above the widget shows what NibCast is hearing as you speak.
+- **Pause music while dictating** — playing music/video pauses and resumes automatically.
+- **Screen context** (optional) — names visible in the active window are spelled correctly.
+
+### Privacy & security
+- **Privacy Mode now works** — no transcript text in history or logs (it was previously saved but not applied).
+- **Debug Bundle** strips dictated text from the log it includes.
+- Dashboard **refuses requests from other websites / local ports** (DNS-rebinding and CSRF protection); **backups no longer contain your login secrets**.
+
+### How to turn things on
+
+| Feature | Where | Extra install (optional) |
+|---|---|---|
+| Fallback LLM (recommended) | Config → AI Backend → `LLM_FALLBACK` | — |
+| In-app Whisper | Config → AI Backend → ASR → **In-app ★ Offline** → DOWNLOAD / LOAD | `pip install faster-whisper` |
+| Local cleanup model | Config → AI Backend → **DETECT LOCAL MODELS** → USE / AS FALLBACK / AS HYBRID | [Ollama](https://ollama.com) + `ollama pull qwen2.5:7b` |
+| Offline Mode | Config → AI Backend → **OFFLINE MODE** | — |
+| Local wake-word engine | Config → Wake Phrase → **WAKE ENGINE** → Local keyword spotter → DOWNLOAD MODEL | `pip install sherpa-onnx sentencepiece` |
+| Wake mishears | Config → Wake Phrase → **SUGGEST FROM HISTORY** | — |
+| Mouse button / double-tap | Config → Recording Mode → **Easier triggers** | — |
+| Live text, pause music, screen context | Config → Recording Mode → **While you dictate** | `pip install winsdk` (music pause + on-screen OCR) |
+| Measure your own quality | `python tools/score_history.py` (reads your history, read-only) | — |
+
+### Upgrading from v2.4.2
+Just update and restart — settings are kept and the history database upgrades
+itself (adds the cleanup-status column). Everything new is **off or opt-in by
+default** except the cleanup improvements. If you restore an old backup on a new
+PC, set your PIN again (backups no longer include login secrets).
+
+---
+
 ## Features
 
 | Category | Features |
 |----------|---------|
-| **Activation** | Hold-to-talk, tap-to-toggle, wake-word (hands-free), click the widget |
-| **ASR** | Groq Whisper (free), OpenAI, Deepgram Nova-3, local whisper.cpp, custom endpoint |
-| **LLM** | Groq (free), Cerebras (free), Gemini (free), OpenAI, Anthropic Claude, Ollama (local/offline), NVIDIA NIM, custom |
-| **Brain Mode** | Run two ASR (or LLM) engines in parallel and keep the best-scoring result — higher accuracy (opt-in; single-engine Groq stays free) |
+| **Activation** | Hold-to-talk, tap-to-toggle, wake-word (hands-free), click the widget, **mouse thumb button**, **double-tap Right Ctrl/Alt/Shift** |
+| **ASR** | Groq Whisper (free), OpenAI, Deepgram Nova-3, **In-app Whisper (fully offline, no server)**, local whisper.cpp server, custom endpoint |
+| **LLM** | Groq (free), Cerebras (free), Gemini (free), OpenAI, Anthropic Claude, **Local models — auto-detects Ollama, LM Studio, llama.cpp, Jan** (no API key), NVIDIA NIM, custom |
+| **Hybrid (Brain) Mode** | Run cloud + local engines at once (transcription and/or cleanup) and keep the best-scoring result; the first good answer wins after a 1.5 s grace window, so it stays fast (opt-in) |
+| **Paste-ready formatting** | Grammatical sentences, fillers / false starts / self-corrections removed, spoken lists → numbered lists, tabular details → Markdown tables where the app renders them |
 | **LLM failover** | If your primary LLM is rate-limited (e.g. Groq's free daily cap) or errors, auto-retry cleanup on a fallback provider you choose — opt-in, never silent |
 | **Custom dictionary** | Teach it your names, jargon & product terms — biases both transcription *and* LLM cleanup, so "cloud code" → "Claude Code" |
-| **Wake word** | Fuzzy Jaro matching, phonetic alternatives, two-phase VAD state machine, mic-gain-adaptive thresholds |
+| **Wake word** | **Local keyword spotter** (instant, offline, nothing uploaded while waiting) or speech-recognition matching with fuzzy/phonetic alternatives learned from your history |
+| **While you dictate** | Live text caption above the widget, auto-pause music/video, optional screen context to spell on-screen names right |
 | **Voice Match** | Optional speaker verification (off by default) — lock dictation to your enrolled voice; adjustable match strictness |
-| **Per-app smarts** | Learns vocabulary per application; different formatting rules per window type |
+| **Per-app smarts** | Learns vocabulary per application; formatting per window type — **AI Prompt** (ChatGPT, Claude, Gemini…), email layout, short chat messages, Markdown only where it renders |
 | **Widget** | 3 shapes (Orb, Bar, Chip) × 3 icon styles × 3 colour themes, draggable, live-switch |
 | **Tray** | Background mode, toggle widget, show/hide from right-click menu |
 | **Dashboard** | Full web UI at `localhost:7171` — opens as a native app window; stats, log, insights, all settings |
@@ -39,7 +100,7 @@ Press a hotkey (or say a wake phrase) → speak → your words appear in any app
 | **Language** | Auto-detect 99 languages; optional translate-to-English mode |
 | **Usage stats** | Per-day / per-week / per-session word count and transcription count |
 | **Fidelity score** | Optional per-entry score showing how closely the injected text matches what was spoken |
-| **Privacy** | Privacy mode (no history logging), local SQLite only, auto-delete old entries |
+| **Privacy** | **Offline Mode** (nothing leaves the PC), Privacy mode (no transcript text in history or logs), local SQLite only, auto-delete old entries |
 | **Diagnostics** | One-click scrubbed Debug Bundle — redacted config + system info + recent log for bug reports (API keys never included) |
 | **Export** | CSV + PDF (date-grouped, timestamped entries) |
 | **Startup** | Optional Windows login auto-start; minimised/background mode |
@@ -110,6 +171,25 @@ pywebview, `desktop_app.py` falls back to the Chrome `--app` window automaticall
 
 ---
 
+### Fully offline — no API keys
+
+Everything can run on your own PC, with nothing sent to the internet:
+
+1. **Speech-to-text:** `pip install faster-whisper`, then Config → AI Backend →
+   ASR → **In-app ★ Offline** → pick a model (`small.en` is a good CPU default;
+   `large-v3-turbo` if you have an NVIDIA GPU) → **DOWNLOAD / LOAD**. The model
+   downloads once. Wake-word checks run locally too, so ambient audio is never
+   uploaded.
+2. **Cleanup LLM:** install [Ollama](https://ollama.com) and run
+   `ollama pull qwen2.5:7b` (or start LM Studio's / llama.cpp's / Jan's server),
+   then Config → AI Backend → **DETECT LOCAL MODELS** → **USE**. Prefer the
+   cloud for speed? Click **AS FALLBACK** instead, so a rate-limited cloud
+   provider falls back to your local model rather than pasting uncleaned text.
+3. Tick **OFFLINE MODE** to make it a hard guarantee — cloud backends are then
+   refused even if selected.
+
+---
+
 ## First-Time Checklist
 
 After `setup.bat` completes:
@@ -177,6 +257,11 @@ After `setup.bat` completes:
 
 ## Wake-Word State Machine
 
+> With **WAKE ENGINE → Local keyword spotter**, Phase 1 below is replaced: every
+> audio block goes to an on-device keyword model, and saying the phrase opens the
+> command window directly — no clip is recorded or transcribed while waiting.
+> The diagram describes the speech-recognition engine.
+
 ```
 ┌─────────────────────────────── PHASE 1: SLEEP ──────────────────────────────┐
 │  All audio → asymmetric EMA (attack α=0.7, release α=0.15)                  │
@@ -223,7 +308,8 @@ The wake gate also **floats above the measured ambient noise floor automatically
 | **Groq wake** | whisper-large-v3 | same quota | ~500 ms |
 | **OpenAI** | whisper-1 | Paid | ~800 ms |
 | **Deepgram** | nova-3 | 12,000 min/month | ~200 ms |
-| **Local** | any Whisper | Unlimited | depends on GPU |
+| **In-app Whisper** | small.en / large-v3-turbo (faster-whisper) | Unlimited, offline | ~1–3 s CPU, <1 s GPU |
+| **Local server** | any Whisper (whisper.cpp, Speaches) | Unlimited | depends on GPU |
 | **Custom** | any OpenAI-compat. | varies | — |
 
 ---
@@ -235,7 +321,7 @@ The wake gate also **floats above the measured ambient noise floor automatically
 | **Groq** (recommended) | llama-3.3-70b-versatile | ✓ (rate-limited) |
 | **Cerebras** | llama-3.3-70b | ✓ (1M tokens/day) |
 | **Gemini** | gemini-2.5-flash | ✓ (Flash tier)¹ |
-| **Ollama** | llama3.2, mistral | ✓ (local) |
+| **Local** (Ollama, LM Studio, llama.cpp, Jan) | qwen2.5:7b, llama3.2 | ✓ (offline — **DETECT LOCAL MODELS** sets it up) |
 | **Anthropic** | claude-3-5-haiku-20241022 | Paid |
 | **OpenAI** | gpt-4o-mini | Paid |
 | **NVIDIA NIM** | llama-3.1-8b-instruct | Free credits |
@@ -311,18 +397,49 @@ All three can be changed live from the dashboard sidebar without restarting.
 
 Both are adjustable in **Config → Wake Word** (match-strictness slider + "Require my voice" toggle) — no need to edit `config.json`.
 
-### Brain Mode
+### Hybrid / Brain Mode
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `BRAIN_MODE` | Run a 2nd backend in parallel and keep the best-scoring result | `false` |
-| `ASR_BRAIN_SECONDARY` | The 2nd ASR engine. For a real accuracy gain pick a *different* engine than your primary (e.g. Groq Whisper + Deepgram nova-3) | `deepgram` |
+| `BRAIN_MODE` | Hybrid **transcription**: run a 2nd speech engine in parallel and keep the better transcript | `false` |
+| `ASR_BRAIN_SECONDARY` | The 2nd ASR engine — pick a *different* one from your primary (e.g. Groq + Deepgram, or Groq + In-app Whisper) | `deepgram` |
+| `LLM_HYBRID` | Hybrid **cleanup**: run `LLM_BRAIN_SECONDARY` in parallel with your LLM and keep the better text (set by the HYBRID CLEANUP picker) | `false` |
+| `LLM_BRAIN_SECONDARY` | The 2nd cleanup LLM, e.g. `ollama` (local) next to Groq | `""` |
+| `BRAIN_GRACE_SEC` | After the first good result, how long to wait for the other engine | `1.5` |
+
+### Local & Offline
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `ASR_BACKEND = "faster_whisper"` | In-app Whisper (needs `faster-whisper`) | — |
+| `LOCAL_WHISPER_MODEL` | `tiny.en` … `small.en` … `large-v3-turbo` | `small.en` |
+| `LOCAL_WHISPER_DEVICE` | `auto` (GPU if found) / `cpu` / `cuda` | `auto` |
+| `OLLAMA_BASE_URL` / `OLLAMA_LLM_MODEL` | Any local OpenAI-compatible server (Ollama, LM Studio, llama.cpp, Jan) — filled in by DETECT LOCAL MODELS | Ollama default |
+| `OFFLINE_MODE` | Refuse every non-local ASR/LLM call | `false` |
+
+### Wake Engine
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `WAKE_ENGINE` | `kws` = local keyword spotter (needs `sherpa-onnx sentencepiece`); `asr` = record a clip and check it with your ASR | `asr` |
+| `WAKE_KWS_SENSITIVITY` | 0 = strict (fewer false wakes) … 1 = eager | `0.5` |
+| `WAKE_WORD_ALTERNATIVES` | Mishears to accept as the wake phrase (ASR engine) — see SUGGEST FROM HISTORY | `[]` |
+
+### Triggers & While-You-Dictate
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `MOUSE_PTT_BUTTON` / `MOUSE_PTT_MODE` | `x1` / `x2` / `middle`; `hold` or `toggle` | off / `hold` |
+| `DOUBLE_TAP_KEY` | `ctrl_r` / `alt_r` / `shift_r` / `caps_lock` | off |
+| `LIVE_PREVIEW` | `auto` (with In-app Whisper) / `cloud` / `off` | `auto` |
+| `PAUSE_MEDIA_WHILE_DICTATING` | Pause/resume playing media (needs `winsdk`) | `false` |
+| `SCREEN_CONTEXT` / `SCREEN_CONTEXT_OCR` | Spell on-screen names right (title + on-device OCR) | `false` / `true` |
 
 ### Privacy & Data
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| `PRIVACY_MODE` | No history logging, no text in logs | `false` |
+| `PRIVACY_MODE` | Keep counts but store no transcript text in history and log none | `false` |
 | `CONTEXT_AWARENESS` | Use active-window app for vocab hints | `true` |
 | `HISTORY_AUTO_DELETE_DAYS` | Auto-delete entries older than N days (0=never) | `0` |
 
@@ -336,8 +453,14 @@ Both are adjustable in **Config → Wake Word** (match-strictness slider + "Requ
   LLM provider you select (Groq / Cerebras / Gemini / OpenAI / NVIDIA / Anthropic /
   Ollama). That data is handled under **that provider's** privacy policy and
   retention terms — not NibCast's. **Note:** some providers' *free* tiers (e.g.
-  Google Gemini) may train on your input — see [PRIVACY.md](PRIVACY.md). Choose a
-  local backend (Whisper / Ollama) to keep everything offline.
+  Google Gemini) may train on your input — see [PRIVACY.md](PRIVACY.md). Choose
+  **In-app Whisper + a local model** and turn on **Offline Mode** to keep
+  everything on your PC.
+- **Wake word:** the local keyword spotter listens on your PC only; with the
+  speech-recognition engine, short clips are sent to your ASR to check for the
+  phrase (use In-app Whisper to keep those local too)
+- **Screen context** (off by default): the screenshot never leaves your PC and
+  isn't saved; only a short list of on-screen names/terms is sent as spelling hints
 - All processing uses **your own API keys** — there is no NibCast cloud or server
 - **No telemetry or analytics** — NibCast collects nothing about you. The only
   request NibCast itself makes is an optional GitHub version check at startup
@@ -345,6 +468,7 @@ Both are adjustable in **Config → Wake Word** (match-strictness slider + "Requ
 - Dashboard is **localhost-only**, protected by PIN / pattern / TOTP
 - Credentials live in `~/.nibcast/` — never committed to source control
 - Privacy mode: transcript text excluded from all logs and history
+- Dashboard rejects requests from other websites and other local ports; backups exclude login secrets
 
 See [PRIVACY.md](PRIVACY.md) for the full data-flow and [LICENSE](LICENSE) for terms.
 
@@ -380,7 +504,16 @@ nibcast/
 ├── notifier.py          Synthesised audio cues (sounddevice)
 ├── target_manager.py    Active-window detection + per-app rules
 ├── state.py             Shared runtime state (thread-safe)
-├── logger.py            Rotating file + console logger
+├── logger.py            Rotating file + console logger (+ Privacy Mode redaction)
+├── local_asr.py         In-app Whisper (faster-whisper), offline speech-to-text
+├── local_models.py      Detect local LLM servers (Ollama, LM Studio, …) + warm-up
+├── hybrid.py            Run two engines at once, first good result wins
+├── wake_engine.py       Local wake-word keyword spotter (sherpa-onnx)
+├── live_preview.py      Live text caption while you speak
+├── media_control.py     Pause / resume playing media around dictation
+├── screen_context.py    Optional on-screen name/term hints (title + on-device OCR)
+├── tools/score_history.py  Read-only quality report over your own history
+├── tests/               Unit tests (python -m pytest tests)
 ├── templates/           Jinja2 HTML dashboard templates
 └── static/              CSS + JS for the dashboard
 ```
@@ -395,8 +528,13 @@ nibcast/
 
 ```
 pip install -r requirements.txt
-pip install pymupdf   # optional — PDF export
+pip install pymupdf                      # optional — PDF export
+pip install faster-whisper               # optional — In-app Whisper (offline speech-to-text)
+pip install sherpa-onnx sentencepiece    # optional — local wake-word engine
+pip install winsdk                       # optional — pause music + on-screen OCR (Windows)
 ```
+
+For fully local cleanup, install [Ollama](https://ollama.com) (or LM Studio / llama.cpp / Jan) and pull a 3–8B instruct model, e.g. `ollama pull qwen2.5:7b`.
 
 ---
 
