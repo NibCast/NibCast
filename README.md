@@ -19,7 +19,7 @@ Press a hotkey (or say a wake phrase) → speak → your words appear in any app
 
 ---
 
-## 🆕 What's New (v2.4.3 → v2.7.0)
+## 🆕 What's New (v2.4.3 → v2.7.1)
 
 These releases were driven by real daily-use history: many dictations were being
 silently pasted *without* LLM cleanup, and most wake-word triggers were false.
@@ -51,6 +51,11 @@ work **fully offline with no API keys** if you want it to. Full details in
 - **Pause music while dictating** — playing music/video pauses and resumes automatically.
 - **Screen context** (optional) — names visible in the active window are spelled correctly.
 
+### Know what's wrong — and fix it in one click (v2.7.1)
+- **System Health** on the Status tab checks the mic, speech-to-text, cleanup LLM, fallback, wake word, Voice Match and offline readiness, and explains every problem in plain words (bad API key, no internet, rate-limited, local model not running…) with **one-click fixes**, plus **GO OFFLINE** / **GO ONLINE** buttons.
+- When a dictation is pasted **without cleanup**, the widget says *NOT CLEANED* and the dashboard tells you why.
+- **Voice Match** (register your voice) is always visible in Config, with a link under the wake phrase.
+
 ### Privacy & security
 - **Privacy Mode now works** — no transcript text in history or logs (it was previously saved but not applied).
 - **Debug Bundle** strips dictated text from the log it includes.
@@ -68,6 +73,8 @@ work **fully offline with no API keys** if you want it to. Full details in
 | Wake mishears | Config → Wake Phrase → **SUGGEST FROM HISTORY** | — |
 | Mouse button / double-tap | Config → Recording Mode → **Easier triggers** | — |
 | Live text, pause music, screen context | Config → Recording Mode → **While you dictate** | `pip install winsdk` (music pause + on-screen OCR) |
+| Register your voice (Voice Match) | Config → **VOICE MATCH** → ENROLL MY VOICE (optional) | — |
+| See what's wrong + fix it | Status → **SYSTEM HEALTH** | — |
 | Measure your own quality | `python tools/score_history.py` (reads your history, read-only) | — |
 
 ### Upgrading from v2.4.2
@@ -512,6 +519,7 @@ nibcast/
 ├── live_preview.py      Live text caption while you speak
 ├── media_control.py     Pause / resume playing media around dictation
 ├── screen_context.py    Optional on-screen name/term hints (title + on-device OCR)
+├── health.py            System Health checks + one-click fixes
 ├── tools/score_history.py  Read-only quality report over your own history
 ├── tests/               Unit tests (python -m pytest tests)
 ├── templates/           Jinja2 HTML dashboard templates
@@ -573,6 +581,10 @@ installed produces a `.exe` that crashes on launch with
 ---
 
 ## Troubleshooting
+
+> **Start with Status → System Health.** It checks every part of NibCast, says
+> in plain words what's wrong, and offers one-click fixes (including GO OFFLINE /
+> GO ONLINE). The sections below cover anything it can't detect.
 
 **Windows Defender / SmartScreen blocks the .exe**
 - Click **More info → Run anyway** (the unsigned executable is safe — you can inspect the source)

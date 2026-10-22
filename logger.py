@@ -26,6 +26,28 @@ logging.basicConfig(
 log = logging.getLogger("NibCast")
 
 
+# Recent problems (WARNING and above) kept in memory for the dashboard's
+# System Health panel, so the user can see what went wrong without opening the
+# log file. Messages are the same as in the log (transcripts already redacted).
+import collections as _collections
+import time as _time
+
+RECENT_PROBLEMS = _collections.deque(maxlen=40)
+
+
+class _ProblemBuffer(logging.Handler):
+    def emit(self, record):
+        try:
+            RECENT_PROBLEMS.append({"time": _time.time(), "level": record.levelname,
+                                    "message": record.getMessage()[:300]})
+        except Exception:
+            pass
+
+
+_problem_handler = _ProblemBuffer(level=logging.WARNING)
+log.addHandler(_problem_handler)
+
+
 def redact(text) -> str:
     """Transcript text for a log line, or a placeholder when Privacy Mode is on.
     Use for every log message that would otherwise contain dictated words."""

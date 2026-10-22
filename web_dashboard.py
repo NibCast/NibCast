@@ -810,6 +810,12 @@ def _on_disk_version():
     return "unknown"
 
 
+def _version_stale():
+    """(running, on_disk, stale) — stale when updated code awaits a restart."""
+    running, on_disk = _app_version(), _on_disk_version()
+    return running, on_disk, "unknown" not in (running, on_disk) and running != on_disk
+
+
 @app.route("/api/app-version")
 def api_app_version():
     """Running vs on-disk app version. The dashboard uses this to warn when
@@ -818,12 +824,8 @@ def api_app_version():
     the Python routes stay OLD — new page features hit missing endpoints and
     fail in confusing ways (HTML 404s parsed as JSON, etc.). Surfacing
     \"restart NibCast\" beats every user having to rediscover that."""
-    running, on_disk = _app_version(), _on_disk_version()
-    return jsonify({
-        "running": running,
-        "on_disk": on_disk,
-        "stale": "unknown" not in (running, on_disk) and running != on_disk,
-    })
+    running, on_disk, stale = _version_stale()
+    return jsonify({"running": running, "on_disk": on_disk, "stale": stale})
 
 
 # Log lines that carry dictated text, and the prefix to keep from each. Logs
@@ -1403,6 +1405,29 @@ def api_test_wake_phrase():
     })
 
 
+@app.route("/api/health")
+def api_health():
+    """System Health: every component checked, with plain-language problems and
+    one-click fixes (see health.py). ?refresh=1 skips the 60 s network cache."""
+    import health
+    if request.args.get("refresh") == "1":
+        health.clear_cache()
+    return jsonify({"ok": True, **health.run_all(_mic_level_at, _version_stale()[2])})
+
+
+@app.route("/api/health/fix", methods=["POST"])
+def api_health_fix():
+    import health
+    data = request.get_json(force=True, silent=True) or {}
+    result = health.apply_fix(str(data.get("action", "")))
+    if result.pop("wake_changed", False) and _wake_control is not None:
+        try:
+            _wake_control()
+        except Exception as e:
+            log.warning(f"Wake re-apply after fix failed: {e}")
+    return jsonify(result)
+
+
 @app.route("/api/extras-status")
 def api_extras_status():
     """Which optional helpers are installed, so the UI can say what's missing."""
@@ -1891,11 +1916,13 @@ def api_autostart():
 
 # ── Real-time microphone level ────────────────────────────────
 _mic_level: float = 0.0
+_mic_level_at: float = 0.0     # when the mic last delivered audio (System Health)
 
 
 def update_mic_level(rms: float):
-    global _mic_level
+    global _mic_level, _mic_level_at
     _mic_level = rms
+    _mic_level_at = time.time()
 
 
 @app.route("/api/mic-level")

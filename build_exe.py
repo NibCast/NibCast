@@ -62,6 +62,7 @@ _HIDDEN = [
     "live_preview",
     "media_control",
     "screen_context",
+    "health",
 ]
 
 

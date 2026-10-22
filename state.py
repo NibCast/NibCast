@@ -21,6 +21,17 @@ _session_words    = 0
 _session_count    = 0
 _session_secs     = 0.0
 _update_available = ""   # set to latest version string when a newer release is found
+# Something worth telling the user that is NOT a failure (e.g. text was pasted
+# but without LLM cleanup). Shown by the dashboard without the error state/sound.
+_last_notice      = ""
+_last_notice_at   = 0.0
+
+
+def set_notice(message: str):
+    global _last_notice, _last_notice_at
+    with _lock:
+        _last_notice    = message
+        _last_notice_at = time.time()
 
 
 def set_state(new_state: str, error: str = ""):
@@ -83,5 +94,7 @@ def snapshot() -> dict:
             "last_text":   _last_text,
             "last_target": _last_target,
             "last_error":  _last_error,
+            "last_notice":    _last_notice,
+            "last_notice_at": _last_notice_at,
             "ts":          time.time(),
         }

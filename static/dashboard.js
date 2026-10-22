@@ -94,6 +94,8 @@ const FONTS_DISPLAY = {
 // user discover it one cryptic error at a time.
 function checkAppVersion() {
   fetch('/api/app-version').then(r => r.json()).then(d => {
+    const bv = document.getElementById('brandVer');
+    if (bv && d.running && d.running !== 'unknown') bv.textContent = `v${d.running} // Multi-Backend`;
     if (!d.stale) return;
     let b = document.getElementById('staleBanner');
     if (!b) {
@@ -120,7 +122,71 @@ window.addEventListener('DOMContentLoaded', () => {
   setInterval(checkAppVersion, 5 * 60 * 1000);
   checkSetupStatus();
   setInterval(refreshAll, 30000);
+  runHealth(false);
+  setInterval(() => runHealth(false), 60000);
 });
+
+// ── System Health ───────────────────────────────────────────
+// Every component checked server-side (health.py); problems are explained in
+// plain words with one-click fixes, so "it doesn't work" always has an answer.
+const _HEALTH_ICON = { ok: '●', warn: '▲', error: '✕', info: '○' };
+const _HEALTH_COL  = { ok: 'var(--vf-cyan)', warn: 'var(--vf-orange)', error: '#ff6b6b', info: 'var(--vf-muted)' };
+
+async function runHealth(refresh) {
+  const list = document.getElementById('healthList');
+  const overall = document.getElementById('healthOverall');
+  if (!list || !overall) return;
+  if (refresh) overall.textContent = 'checking…';
+  try {
+    const d = await (await fetch('/api/health' + (refresh ? '?refresh=1' : ''))).json();
+    if (!d.ok) return;
+    const e = d.errors || 0, w = d.warnings || 0;
+    const parts = [];
+    if (e) parts.push(`${e} problem${e === 1 ? '' : 's'}`);
+    if (w) parts.push(`${w} warning${w === 1 ? '' : 's'}`);
+    overall.textContent = d.overall === 'ok' ? '✓ Everything is working' : parts.join(', ') + ' — see below';
+    overall.style.color = _HEALTH_COL[d.overall] || '';
+    const hdr = document.getElementById('hdrHealth');
+    if (hdr) { hdr.style.display = e ? '' : 'none'; hdr.textContent = `⚠ ${e} PROBLEM${e === 1 ? '' : 'S'}`; }
+    // Problems first, then the rest.
+    const order = { error: 0, warn: 1, info: 2, ok: 3 };
+    const checks = d.checks.slice().sort((a, b) => order[a.status] - order[b.status]);
+    list.innerHTML = checks.map(c => {
+      const fixes = (c.fixes || []).map(f =>
+        `<button class="btn-ghost" style="padding:1px 8px;font-size:9px;margin:3px 6px 0 0"
+                 onclick="applyHealthFix('${escHtml(f.action)}', this)">${escHtml(f.label)}</button>`).join('');
+      const detail = (c.status === 'ok' || !c.detail) ? '' :
+        `<div style="color:var(--vf-muted);margin:1px 0 0 18px">${escHtml(c.detail)}</div>`;
+      return `<div style="padding:4px 0;border-bottom:1px solid var(--vf-b0)">
+        <span style="color:${_HEALTH_COL[c.status]};display:inline-block;width:14px">${_HEALTH_ICON[c.status]}</span>
+        <span style="color:var(--vf-muted);min-width:120px;display:inline-block">${escHtml(c.area)}</span>
+        <span>${escHtml(c.title)}</span>${detail}
+        ${fixes ? `<div style="margin-left:18px">${fixes}</div>` : ''}</div>`;
+    }).join('');
+    const lg = document.getElementById('healthLog');
+    if (lg) lg.textContent = (d.recent_log || []).map(p =>
+      `${new Date(p.time * 1000).toLocaleTimeString()}  ${p.level}  ${p.message}`).join('\n') || 'Nothing recent.';
+  } catch (e) {
+    overall.textContent = 'Health check failed: ' + e;
+  }
+}
+
+async function applyHealthFix(action, btn) {
+  const msg = document.getElementById('healthFixMsg');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/health/fix', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                                               body: JSON.stringify({ action }) });
+    const d = await r.json();
+    if (msg) { msg.textContent = d.message || ''; msg.style.color = d.ok ? 'var(--vf-cyan)' : 'var(--vf-orange)'; }
+    if (typeof loadConfig === 'function') loadConfig();     // reflect changed settings in Config
+    setTimeout(() => runHealth(true), 800);
+  } catch (e) {
+    if (msg) { msg.textContent = 'Fix failed: ' + e; msg.style.color = '#ff6b6b'; }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 // ── First-run setup banner + wizard ─────────────────────────
 let _wizStep = 1;
@@ -1222,6 +1288,7 @@ function toggleVoiceActivation() {
   const tog2 = document.getElementById('togWakeWordMode')?.querySelector('.tog');
   if (tog2) tog2.classList.toggle('tog-on', _cfgToggles.WAKE_WORD_ENABLED);
   setRecordingMode(); // sync voice card active state
+  loadEnrollmentStatus();
 }
 
 function toggleCfg(cfgKey) {
@@ -1232,6 +1299,7 @@ function toggleCfg(cfgKey) {
     const tog  = wrap?.querySelector('.tog');
     if (tog) tog.classList.toggle('tog-on', _cfgToggles[cfgKey]);
   }
+  if (cfgKey === 'VOICE_ENROLLMENT_ENABLED') loadEnrollmentStatus();
   if (cfgKey === 'CLEAN_WITH_LLM') {
     const dot = document.getElementById('cfgLlmDot');
     const lbl = document.getElementById('cfgLlmLabel');
@@ -2393,18 +2461,29 @@ function loadEnrollmentStatus() {
       const clearBtn = document.getElementById('enrollClearBtn');
       if (!row) return;
 
-      // Show enrollment row only when wake word mode is on
-      row.style.display = _cfgToggles.WAKE_WORD_ENABLED ? '' : 'none';
-
-      if (d.enrolled) {
-        status.textContent   = `Voice enrolled (${d.sample_count} samples) — only your voice activates the phrase`;
-        status.style.color   = 'var(--vf-cyan)';
-        if (clearBtn) clearBtn.style.display = '';
+      // Always visible (it used to appear only after voice activation was on,
+      // so people couldn't find where to register their voice). Say plainly
+      // what state it's in and what's still needed.
+      row.style.display = '';
+      const wakeOn   = !!_cfgToggles.WAKE_WORD_ENABLED;
+      const enforced = !!_cfgToggles.VOICE_ENROLLMENT_ENABLED;
+      let msg, col;
+      if (!d.enrolled) {
+        msg = 'Not registered — anyone can trigger the wake phrase. Click ENROLL MY VOICE (say the wake phrase 3 times).';
+        col = 'var(--vf-muted)';
+      } else if (!enforced) {
+        msg = `Voice registered (${d.sample_count} samples) but not enforced — turn on "Require my voice for commands" below.`;
+        col = 'var(--vf-orange)';
       } else {
-        status.textContent   = 'Not enrolled — anyone can trigger the wake phrase';
-        status.style.color   = 'var(--vf-muted)';
-        if (clearBtn) clearBtn.style.display = 'none';
+        msg = `Voice registered (${d.sample_count} samples) — only your voice can wake NibCast and dictate.`;
+        col = 'var(--vf-cyan)';
       }
+      if (!wakeOn) msg += ' (Voice activation is off — turn on ENABLED next to the wake phrase to use it.)';
+      status.textContent = msg;
+      status.style.color = col;
+      if (clearBtn) clearBtn.style.display = d.enrolled ? '' : 'none';
+      const mini = document.getElementById('wakeVoiceMatchState');
+      if (mini) mini.textContent = d.enrolled ? (enforced ? '✓ registered & active' : '✓ registered (not enforced)') : '(not registered)';
     })
     .catch(() => {});
 }
@@ -2864,6 +2943,7 @@ function stopLlmStream(success) {
 
 // ── State poller: watch for 'processing' to auto-open stream ──
 let _lastState = 'idle';
+let _lastNoticeAt = 0;
 function pollState() {
   fetch('/api/state')
     .then(r => r.json())
@@ -2875,6 +2955,27 @@ function pollState() {
       if (s !== 'processing' && _lastState === 'processing' && !_sseActive) {
         const liveBox = document.getElementById('liveStreamBox');
         if (liveBox) liveBox.style.display = 'none';
+      }
+      // A dictation just failed or was pasted uncleaned: show WHY on the
+      // Status tab (the widget only flashes a short label) and re-check health.
+      if (d.last_notice_at && d.last_notice_at > _lastNoticeAt) {
+        if (_lastNoticeAt) {                     // skip the one already there at page load
+          const box = document.getElementById('healthFixMsg');
+          if (box) { box.textContent = `${new Date(d.last_notice_at * 1000).toLocaleTimeString()} — ${d.last_notice}`;
+                     box.style.color = 'var(--vf-orange)'; }
+          showToast(d.last_notice.slice(0, 140));
+          runHealth(false);
+        }
+        _lastNoticeAt = d.last_notice_at;
+      }
+      if (s === 'error' && _lastState !== 'error' && d.last_error) {
+        const box = document.getElementById('healthFixMsg');
+        if (box) {
+          box.textContent = `${new Date().toLocaleTimeString()} — ${d.last_error}`;
+          box.style.color = '#ff6b6b';
+        }
+        showToast(d.last_error.slice(0, 140));
+        runHealth(false);
       }
       _lastState = s;
 

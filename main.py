@@ -1,7 +1,7 @@
 # ============================================================
 #  NibCast — Main Entry Point
 # ============================================================
-__version__ = "2.7.0"
+__version__ = "2.7.1"
 
 import sys
 
@@ -572,6 +572,20 @@ def on_vad_press():
         # Phase 1: ambient check for wake phrase — no widget animation until wake confirmed
         with _wake_lock:
             _vad_is_command_recording = False
+
+
+def _notify_if_uncleaned(llm_status: str):
+    """The text was pasted, but without LLM cleanup — say so, and why, every
+    time (widget + dashboard status), instead of leaving the user guessing.
+    The dashboard's System Health panel offers the fixes."""
+    import health
+    why = health.explain_llm_status(llm_status or "")
+    if why:
+        # A notice, not an error: the paste worked. Short label on the widget
+        # (no error sound / error state), full reason on the dashboard.
+        widget.show_error("NOT CLEANED")
+        state.set_notice(f"Pasted without cleanup: {why}. "
+                         f"See Status → System Health for a fix.")
 
 
 def _flash_error(short_label: str, full_msg: str):
@@ -1149,6 +1163,7 @@ def _run_release_pipeline():
     state.set_state("idle")
     if tray: tray.set_idle()
     widget.hide()
+    _notify_if_uncleaned(processor.last_status)
 
     if _is_cmd:
         # Phase-2 command pasted — return VAD to sleep and suppress trailing speech
@@ -1237,6 +1252,7 @@ def on_command_release():
         clean_text = processor.clean(instruction, llm_hint=target_info.get("llm_hint", ""))
         clean_text = _apply_rules(clean_text, target_info)
         injector.inject(clean_text)
+        _notify_if_uncleaned(processor.last_status)
         state.set_last_transcript(clean_text, target_info["label"])
         db.save_transcription(
             raw_text=instruction, clean_text=clean_text,

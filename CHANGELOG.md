@@ -5,6 +5,35 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
+## [2.7.1] — 2026-10-22
+
+"It doesn't work and I can't tell why" now always has an answer.
+
+### Added
+- **System Health** (top of the Status tab). Checks the microphone, speech-to-
+  text, the cleanup LLM, the fallback and hybrid engines, what actually happened
+  to your last 20 dictations, the wake word, Voice Match and offline readiness —
+  and explains each problem in plain words: missing or rejected API key, no
+  internet, provider rate-limiting you, local model server not running or
+  missing the model, Offline Mode blocking a cloud engine, NibCast needing a
+  restart after an update… Each problem has **one-click fixes**, and two global
+  buttons: **GO OFFLINE** (In-app Whisper + a local model + Offline Mode — or a
+  precise list of what's still missing) and **GO ONLINE** (Groq for both).
+  Re-checks every minute; a red **⚠ PROBLEMS** button appears in the header
+  when something is broken. Recent warnings/errors are listed underneath.
+- **Every uncleaned paste says why.** The widget shows *NOT CLEANED* and the
+  dashboard shows the reason (e.g. "the cleanup provider is rate-limiting
+  you") — no error sound, since the paste itself worked.
+
+### Changed
+- **Voice Match (register your voice) is always visible** in Config — it used
+  to appear only after voice activation was switched on. A link under the wake
+  phrase jumps to it, and it states clearly whether your voice is registered,
+  enforced, and what's still needed. It's optional: the wake word works without it.
+- The dashboard header shows the running version instead of a fixed "v2.4".
+
+---
+
 ## [2.7.0] — 2026-10-22
 
 ### Added
@@ -55,6 +84,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 - Debug bundle: multi-line dictations from older logs, wake-match details and
   snippet expansions are scrubbed too; Privacy Mode redacts them in new logs.
 - Screen OCR works for windows on a second monitor.
+- History database connections are now always closed (they were leaked on
+  every read/write, keeping the file locked on Windows).
 
 ---
 
