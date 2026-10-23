@@ -8,6 +8,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 ## [Unreleased]
 
 ### Fixed
+- **A dropdown no longer silently discards a setting it doesn't recognise.**
+  `setSelectValue` left the first option selected when the saved value wasn't
+  among the choices, so the next SAVE wrote that first option back — a model a
+  provider had renamed was replaced without a word. Unknown values are now kept
+  and shown as *"(current setting)"*.
+- **Groq's default model is current again.** `llama-3.3-70b-versatile` has been
+  retired by Groq; the default, the dashboard choices and the fallbacks in
+  `text_processor` / `web_dashboard` now use `openai/gpt-oss-20b`. Following the
+  old default produced an immediate HTTP 404 and uncleaned text.
 - **System Health no longer suggests a fallback you already have.** The "Use a
   local model as fallback" button appeared even when `LLM_FALLBACK_BACKEND` was
   configured, which just reads as noise.

@@ -69,7 +69,7 @@ GROQ_ASR_MODEL = "whisper-large-v3-turbo"  # fast, used for command dictation
 # fractional delay. (Command dictation still uses the fast turbo model above.)
 GROQ_ASR_MODEL_WAKE = "whisper-large-v3"
 GROQ_LLM_URL   = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_LLM_MODEL = "llama-3.3-70b-versatile"
+GROQ_LLM_MODEL = "openai/gpt-oss-20b"   # Groq retired llama-3.3-70b-versatile
 
 # OpenAI (ASR + LLM)
 OPENAI_API_KEY   = ""

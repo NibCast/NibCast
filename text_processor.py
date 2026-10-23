@@ -592,7 +592,7 @@ def _llm_params(name: str) -> dict | None:
             return None
         return {"url":   getattr(config, "GROQ_LLM_URL",   "https://api.groq.com/openai/v1/chat/completions"),
                 "key":   key,
-                "model": getattr(config, "GROQ_LLM_MODEL", "llama-3.3-70b-versatile"),
+                "model": getattr(config, "GROQ_LLM_MODEL", "openai/gpt-oss-20b"),
                 "name":  "Groq", "kind": "openai_compat"}
     elif n == "openai":
         key = getattr(config, "OPENAI_API_KEY", "")

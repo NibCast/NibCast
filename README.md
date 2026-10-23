@@ -651,6 +651,21 @@ installed produces a `.exe` that crashes on launch with
 **Text is not being cleaned / LLM not running**
 - Check that `CLEAN_WITH_LLM` is enabled in Config and that your LLM backend key is set and tested.
 
+**Every dictation starts with "Speaker 1:"**
+- Deepgram speaker diarization is on. It labels who said what, which is useful for
+  meetings but wrong for dictation, where the label gets pasted with your text.
+- Turn off **`DEEPGRAM_DIARIZE`** in Config → AI Backend (default is off).
+
+**A setting I changed keeps reverting to its old value**
+- Settings backed by a dropdown used to be silently reset when the saved value
+  wasn't one of the listed choices — for example a model the provider has since
+  renamed. The dropdown fell back to its first entry and overwrote your value on
+  the next SAVE. Fixed: an unrecognised value is now kept and shown as
+  *"(current setting)"*.
+- Note that a running NibCast owns its settings: editing
+  `~/.nibcast/config.json` by hand while the app is open is overwritten on the
+  next save. Change settings in the dashboard, or quit NibCast first.
+
 **Widget shows NOT CLEANED, and the log says `LLM HTTP 404 — model does not exist`**
 - Your provider retired the model you had configured. Pick a current one in
   Config → AI Backend (Status → System Health names this cause directly).

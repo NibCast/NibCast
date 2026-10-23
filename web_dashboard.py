@@ -1024,7 +1024,7 @@ def api_get_config():
         "GROQ_API_KEY_MASKED": _mask_key(getattr(config, "GROQ_API_KEY", "") or ""),
         "GROQ_API_KEY_SET":    bool(getattr(config, "GROQ_API_KEY", "")),
         "GROQ_ASR_MODEL": getattr(config, "GROQ_ASR_MODEL", "whisper-large-v3-turbo"),
-        "GROQ_LLM_MODEL": getattr(config, "GROQ_LLM_MODEL", "llama-3.3-70b-versatile"),
+        "GROQ_LLM_MODEL": getattr(config, "GROQ_LLM_MODEL", "openai/gpt-oss-20b"),
         "BRAIN_MODE":          getattr(config, "BRAIN_MODE", False),
         "ASR_BRAIN_SECONDARY": getattr(config, "ASR_BRAIN_SECONDARY", "openai"),
         "LLM_BRAIN_SECONDARY": getattr(config, "LLM_BRAIN_SECONDARY", ""),

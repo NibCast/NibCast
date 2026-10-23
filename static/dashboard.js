@@ -385,6 +385,15 @@ function setSelectValue(id, val) {
   for (const opt of el.options) {
     if (opt.value === String(val)) { opt.selected = true; return; }
   }
+  // The saved value isn't one of the built-in choices -- a provider renamed or
+  // retired a model, or it was set by hand. Keep it as an option instead of
+  // leaving the first entry selected, which would silently overwrite the
+  // setting on the next SAVE.
+  const opt = document.createElement('option');
+  opt.value = String(val);
+  opt.textContent = String(val) + ' (current setting)';
+  opt.selected = true;
+  el.appendChild(opt);
 }
 
 // ── Load Stats ───────────────────────────────────────────────
@@ -1361,7 +1370,7 @@ function saveConfig() {
   const groqKey = document.getElementById('cfgGroqKey')?.value.trim();
   if (groqKey) cfg.GROQ_API_KEY = groqKey;
   cfg.GROQ_ASR_MODEL = document.getElementById('cfgGroqAsrModel')?.value || 'whisper-large-v3-turbo';
-  cfg.GROQ_LLM_MODEL = document.getElementById('cfgGroqLlmModel')?.value || 'llama-3.3-70b-versatile';
+  cfg.GROQ_LLM_MODEL = document.getElementById('cfgGroqLlmModel')?.value || 'openai/gpt-oss-20b';
 
   cfg.BRAIN_MODE = _cfgToggles.BRAIN_MODE;
   cfg.ASR_BRAIN_SECONDARY = document.getElementById('cfgBrainSecondary')?.value || 'openai';

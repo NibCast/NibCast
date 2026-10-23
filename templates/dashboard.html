@@ -1000,11 +1000,12 @@
           <div class="cfg-key">GROQ_LLM_MODEL</div>
           <div class="cfg-val">
             <select class="cfg-select" id="cfgGroqLlmModel" onchange="markUnsaved()">
-              <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile (best quality — recommended for dictation)</option>
-              <option value="llama-3.1-8b-instant">llama-3.1-8b-instant (fastest, lighter cleanup)</option>
-              <option value="mixtral-8x7b-32768">mixtral-8x7b-32768 (legacy)</option>
+              <option value="openai/gpt-oss-20b">openai/gpt-oss-20b (fast — recommended for dictation)</option>
+              <option value="openai/gpt-oss-120b">openai/gpt-oss-120b (best quality, slightly slower)</option>
+              <option value="qwen/qwen3.8-27b">qwen/qwen3.8-27b (alternative)</option>
             </select>
-            <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Not sure? Keep <b>llama-3.3-70b-versatile</b> — it gives the cleanest dictation output.</div>
+            <div style="font-size:10px;color:var(--vf-muted);margin-top:4px">Not sure? Keep <b>openai/gpt-oss-20b</b> — it cleans dictation in well under a second.<br>
+            Groq retires models from time to time; if cleanup starts failing with <b>HTTP 404</b>, check Status → System Health and pick a current model here.</div>
           </div>
         </div>
       </div>
