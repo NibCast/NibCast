@@ -46,6 +46,9 @@ def explain_llm_status(status: str) -> str:
     if not status or not status.startswith("basic:"):
         return ""
     reason = status.split(":", 1)[1]
+    if reason == "http_404":
+        return ("the cleanup model doesn't exist at that provider any more (providers retire "
+                "models) — pick a current one in Config → AI Backend")
     if reason.startswith("http_"):
         return f"the cleanup LLM returned HTTP {reason[5:]}"
     return _STATUS_TEXT.get(reason, reason.replace("_", " "))
@@ -318,7 +321,11 @@ def check_recent_dictations(limit: int = 20) -> dict:
         why = explain_llm_status(r["llm_status"])
         reasons[why] = reasons.get(why, 0) + 1
     top = max(reasons, key=reasons.get)
-    fixes = [] if getattr(config, "LLM_BACKEND", "") == "ollama" else [("Use a local model as fallback", "fallback_local")]
+    # Only suggest adding a local fallback when there isn't one already —
+    # offering it to someone who has it configured just reads as noise.
+    has_fallback = bool((getattr(config, "LLM_FALLBACK_BACKEND", "") or "").strip())
+    already_local = getattr(config, "LLM_BACKEND", "") == "ollama" or has_fallback
+    fixes = [] if already_local else [("Use a local model as fallback", "fallback_local")]
     if "rate-limit" in top:
         fixes.append(("Switch everything to offline", "use_offline"))
     return _check("recent", "Recent dictations",

@@ -79,9 +79,13 @@ class GuardTests(unittest.TestCase):
 class CleanupStatusTests(unittest.TestCase):
 
     def setUp(self):
+        # Every config value the cleanup path reads must be pinned here. These
+        # tests used to inherit the developer's own ~/.nibcast/config.json, so
+        # Offline Mode or Hybrid being on at home made them fail for no reason.
         self._saved = {k: getattr(config, k) for k in
                        ("CLEAN_WITH_LLM", "LLM_BACKEND", "GROQ_API_KEY", "BRAIN_MODE",
-                        "LLM_FALLBACK_BACKEND", "HTTP_RETRIES", "WHISPER_PROMPT", "PRIVACY_MODE")}
+                        "LLM_FALLBACK_BACKEND", "HTTP_RETRIES", "WHISPER_PROMPT", "PRIVACY_MODE",
+                        "OFFLINE_MODE", "LLM_HYBRID", "LLM_BRAIN_SECONDARY")}
         config.CLEAN_WITH_LLM = True
         config.LLM_BACKEND = "groq"
         config.GROQ_API_KEY = "test"
@@ -90,6 +94,9 @@ class CleanupStatusTests(unittest.TestCase):
         config.HTTP_RETRIES = 3
         config.WHISPER_PROMPT = ""
         config.PRIVACY_MODE = False
+        config.OFFLINE_MODE = False
+        config.LLM_HYBRID = False
+        config.LLM_BRAIN_SECONDARY = ""
         self.sleep = mock.patch.object(tp.time, "sleep").start()
 
     def tearDown(self):
