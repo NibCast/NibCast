@@ -69,7 +69,7 @@ work **fully offline with no API keys** if you want it to. Full details in
 | In-app Whisper | Config → AI Backend → ASR → **In-app ★ Offline** → DOWNLOAD / LOAD | `pip install faster-whisper` |
 | Local cleanup model | Config → AI Backend → **DETECT LOCAL MODELS** → USE / AS FALLBACK / AS HYBRID | [Ollama](https://ollama.com) + `ollama pull qwen2.5:7b` |
 | Offline Mode | Config → AI Backend → **OFFLINE MODE** | — |
-| Local wake-word engine | Config → Wake Phrase → **WAKE ENGINE** → Local keyword spotter → DOWNLOAD MODEL | `pip install sherpa-onnx sentencepiece` |
+| Local wake-word engine | Config → Wake Phrase → **WAKE ENGINE** → Local keyword spotter → DOWNLOAD MODEL | `venv\Scripts\python -m pip install sherpa-onnx sentencepiece` |
 | Wake mishears | Config → Wake Phrase → **SUGGEST FROM HISTORY** | — |
 | Mouse button / double-tap | Config → Recording Mode → **Easier triggers** | — |
 | Live text, pause music, screen context | Config → Recording Mode → **While you dictate** | `pip install winsdk` (music pause + on-screen OCR) |
@@ -325,13 +325,19 @@ The wake gate also **floats above the measured ambient noise floor automatically
 
 | Backend | Recommended model | Free |
 |---------|------------------|------|
-| **Groq** (recommended) | llama-3.3-70b-versatile | ✓ (rate-limited) |
+| **Groq** (recommended) | openai/gpt-oss-20b | ✓ (rate-limited) |
 | **Cerebras** | llama-3.3-70b | ✓ (1M tokens/day) |
 | **Gemini** | gemini-2.5-flash | ✓ (Flash tier)¹ |
 | **Local** (Ollama, LM Studio, llama.cpp, Jan) | qwen2.5:7b, llama3.2 | ✓ (offline — **DETECT LOCAL MODELS** sets it up) |
 | **Anthropic** | claude-3-5-haiku-20241022 | Paid |
 | **OpenAI** | gpt-4o-mini | Paid |
 | **NVIDIA NIM** | llama-3.1-8b-instruct | Free credits |
+
+> ⚠️ **Providers retire models.** A model that worked for months can start returning
+> **HTTP 404** overnight (Groq dropped `llama-3.3-70b-versatile` this way). The model
+> names above are current at the time of writing — if cleanup suddenly stops, check
+> **Status → System Health**, which names this exact cause, then pick a current model
+> in Config → AI Backend.
 
 ¹ **Privacy:** Google's *free* Gemini tier may use your dictated text to improve its
 products. For private dictation use a paid Gemini key, or pick Groq/Cerebras. The same
@@ -535,6 +541,9 @@ nibcast/
 - A free [Groq API key](https://console.groq.com) (or any other supported backend)
 
 ```
+# Run these with the SAME Python that runs NibCast. If you use the bundled
+# virtual environment, that is venv\Scripts\python -- installing into the system
+# Python instead is why an extra can look installed but still be reported missing.
 pip install -r requirements.txt
 pip install pymupdf                      # optional — PDF export
 pip install faster-whisper               # optional — In-app Whisper (offline speech-to-text)
@@ -641,6 +650,29 @@ installed produces a `.exe` that crashes on launch with
 
 **Text is not being cleaned / LLM not running**
 - Check that `CLEAN_WITH_LLM` is enabled in Config and that your LLM backend key is set and tested.
+
+**Widget shows NOT CLEANED, and the log says `LLM HTTP 404 — model does not exist`**
+- Your provider retired the model you had configured. Pick a current one in
+  Config → AI Backend (Status → System Health names this cause directly).
+- This can also make dictation feel **slow**: with Hybrid on, a primary that errors
+  never produces a usable answer, so the race waits for the local model instead of
+  closing after its short grace window. Fixing the model restores normal speed.
+
+**Dictation got slow — pasting takes tens of seconds**
+- Check **Status → System Health** first. The usual cause is the cleanup LLM failing
+  (see above) rather than speech-to-text, which normally returns in about a second.
+- If your local model is the slow one, prefer a small **text** model (e.g. `qwen3:4b`,
+  `qwen2.5:7b`) over a vision model such as `qwen3-vl:8b`, which is much slower to
+  answer and can time out.
+
+**I installed `sherpa-onnx` / `faster-whisper` but NibCast still says it's missing**
+- It almost certainly went into a different Python. NibCast runs from its own virtual
+  environment, so install into **that** interpreter, not the system one:
+  ```
+  venv\Scripts\python -m pip install sherpa-onnx sentencepiece   # local wake engine
+  venv\Scripts\python -m pip install faster-whisper              # offline speech-to-text
+  ```
+- Restart NibCast afterwards — optional extras are detected at startup.
 
 ---
 

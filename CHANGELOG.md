@@ -5,6 +5,30 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
+## [Unreleased]
+
+### Fixed
+- **System Health no longer suggests a fallback you already have.** The "Use a
+  local model as fallback" button appeared even when `LLM_FALLBACK_BACKEND` was
+  configured, which just reads as noise.
+- **A cleanup failure of HTTP 404 now explains itself** — it means the provider
+  retired the configured model (Groq dropped `llama-3.3-70b-versatile`), not an
+  unexplained status code.
+- **Tests no longer inherit the developer's own config.** `CleanupStatusTests`
+  pinned 8 settings but not `OFFLINE_MODE`, `LLM_HYBRID` or
+  `LLM_BRAIN_SECONDARY`, so three tests failed on a machine with Offline Mode or
+  Hybrid switched on and passed only on a default config.
+
+### Documentation
+- README recommends a current Groq model, warns that providers retire models,
+  and shows optional extras being installed into the same Python that runs
+  NibCast — installing into the system Python is why `sherpa-onnx` could look
+  installed while NibCast still reported it missing.
+- New troubleshooting entries for *NOT CLEANED / HTTP 404* and for dictation
+  that suddenly feels slow.
+
+---
+
 ## [2.7.1] — 2026-10-22
 
 "It doesn't work and I can't tell why" now always has an answer.
