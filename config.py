@@ -73,6 +73,18 @@ LLM_AUTO_CANDIDATES   = 3       # engines raced per dictation
 LLM_AUTO_MAX_WAIT_SEC = 10.0    # never hold a paste longer than this
 LLM_AUTO_GRACE_SEC    = 2.0     # after the first good answer, wait this long for better ones
 
+# ── Learned vocabulary (vocabulary.py) ─────────────────────────
+# NibCast builds your word list by itself — names, acronyms and products you
+# keep saying, and words the cleanup (or you, in the edit box) had to correct —
+# and feeds it to Deepgram (keyterms), Whisper (prompt) and the cleanup LLM.
+# Review it on the dashboard (Config → LEARNED WORDS): pin, remove (never
+# comes back), add your own, or import your Wispr Flow dictionary.
+# The list is kept on this computer; the words themselves go to your speech
+# and cleanup services with each dictation, like your dictionary does.
+VOCAB_AUTO_LEARN  = True
+VOCAB_MAX_TERMS   = 50     # most words fed to the engines
+VOCAB_FORGET_DAYS = 90     # words learned only by repetition fade if unused this long
+
 # Fidelity floor (0–1). A cleanup that keeps less than this share of what you
 # said (word-level, ignoring fillers) is treated as a rewrite: it is re-run in
 # verbatim style, and if still too far off your own words are pasted instead.
@@ -387,6 +399,7 @@ _PERSISTED_KEYS = (
     "ASR_BACKEND", "LLM_BACKEND", "LLM_FALLBACK_BACKEND",
     "LLM_AUTO_SELECT", "LLM_AUTO_PROVIDERS", "LLM_AUTO_CANDIDATES",
     "LLM_AUTO_MAX_WAIT_SEC", "LLM_AUTO_GRACE_SEC", "LLM_FIDELITY_FLOOR",
+    "VOCAB_AUTO_LEARN", "VOCAB_MAX_TERMS", "VOCAB_FORGET_DAYS",
     "GROQ_API_KEY", "GROQ_ASR_MODEL", "GROQ_LLM_MODEL",
     "OPENAI_API_KEY", "OPENAI_ASR_MODEL", "OPENAI_LLM_MODEL",
     "ANTHROPIC_API_KEY", "ANTHROPIC_LLM_MODEL",

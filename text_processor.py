@@ -811,6 +811,19 @@ class TextProcessor:
         # the only stage that can recover it — and it can't without knowing the
         # intended spellings. Strictly corrective: never inject a term not spoken.
         _vocab = getattr(config, "WHISPER_PROMPT", "").strip()
+        try:
+            import vocabulary
+            _learned = [t for t in vocabulary.active_terms()
+                        if t.lower() not in _vocab.lower()]
+            _pairs = vocabulary.known_mishearings()
+        except Exception:
+            _learned, _pairs = [], []
+        if _learned:
+            _vocab = ", ".join(([_vocab] if _vocab else []) + _learned)
+        if _pairs:
+            hint_line += ("\nKnown mishearings of the speaker's words — replace these "
+                          "with the correct spelling when the sentence shows that's what was meant: "
+                          + "; ".join(f'"{m}" → {t}' for m, t in _pairs[:25]))
         if _vocab:
             hint_line += ("\nUser vocabulary — these are the correct spellings of the "
                           "speaker's own names, products, and jargon. When a word or "

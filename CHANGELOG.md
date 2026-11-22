@@ -5,6 +5,43 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
+## [2.9.0] — 2026-11-22
+
+### Added — learned vocabulary (`vocabulary.py`, Config → LEARNED WORDS)
+- **NibCast builds your word list by itself** and feeds it to every engine:
+  Deepgram nova-3 keyterms, the Whisper prompt (Groq / OpenAI / in-app) and
+  the cleanup LLM — with the misheard forms it has seen ("nip cache" →
+  NibCast), so the LLM knows what to fix. Sources:
+  - **repeat** — names, acronyms and brand spellings you keep saying
+    (CamelCase / ACRONYMS / alphanumerics after 3 dictations; plain
+    Capitalised words after 4 and only if you nearly always capitalise them).
+  - **correct** — words the cleanup had to fix (2 sightings).
+  - **edit** — words you changed in the edit-before-paste box (immediately).
+  - **Wispr Flow** — one-click, read-only import of its personal dictionary
+    (skips e-mail addresses, links, snippets and expansions like "btw").
+  - **manual** — add a word (and how it's usually misheard) on the dashboard.
+- **You stay in control**: ★ pins a word, ✕ removes it for good (it is never
+  re-learned), ↺ restores it; RE-LEARN rebuilds from history.
+- **Guard rails against bad words**: ordinary English words are never learned;
+  at most `VOCAB_MAX_TERMS` (50) are fed, pinned / your own first; very short
+  automatic acronyms (AI, ID, PC) go to the prompt but are not boosted as
+  Deepgram keyterms; misheard forms that are plurals or ordinary phrases
+  ("you I" → UI) are not taught to the LLM; words learned only by repetition
+  fade after `VOCAB_FORGET_DAYS` (90) unused. Nothing is learned in Privacy
+  Mode or from uncleaned (basic) pastes.
+- First run learns from your existing history in the background.
+
+### Fixed
+- **Brain-mode transcription picked the garbled transcript.** It kept whichever
+  engine returned *more words*, which favoured Whisper's long-form failure — a
+  lower-case, unpunctuated run-on with extra wrong words — over Deepgram's clean
+  one. Transcripts are now judged on completeness, sentence structure, looping
+  repeats and correctly spelled known words.
+- **The per-app "vocab hint" made Whisper worse.** It sent ~50 common words
+  ("create want application give…") as a bare lower-case list, which primed
+  Whisper into lower-case, unpunctuated output. Replaced by a short punctuated
+  sentence naming your learned words and your own dictionary.
+
 ## [2.8.0] — 2026-11-22
 
 ### Output quality (dictation cleanup)
@@ -44,6 +81,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
   NibCast and "read me" / "write me" file → README.
 - `hybrid.race_many()` — the N-engine version of `race_two()`.
 - `tests/test_v280_quality.py` — tests for all of the above.
+- `tests/test_v290_vocabulary.py` — tests for 2.9.0 (above).
 
 ### Fixed
 - **Voice mode no longer goes quietly silent.** Clips heard without the wake

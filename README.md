@@ -19,7 +19,19 @@ Press a hotkey (or say a wake phrase) → speak → your words appear in any app
 
 ---
 
-## 🆕 What's New in v2.8.0 — faithful, paste-ready cleanup
+## 🆕 What's New in v2.9.0 — NibCast learns your words
+
+- **Learned vocabulary** — names, acronyms and products you keep saying, words the
+  cleanup or you had to correct, and (one click) your Wispr Flow dictionary are collected
+  in **Config → LEARNED WORDS** and fed to Deepgram, Whisper and the cleanup LLM, together
+  with how each word tends to be misheard. Pin ★, remove ✕ (for good), or add your own.
+  Guard rails keep ordinary words and bad guesses out. Local only; on by default
+  (`VOCAB_AUTO_LEARN`).
+- **Better hybrid transcription** — Brain mode now judges the two transcripts instead of
+  keeping the longer one, so a garbled, unpunctuated Whisper run-on no longer beats a clean
+  Deepgram transcript.
+
+## What's New in v2.8.0 — faithful, paste-ready cleanup
 
 Measured against real daily history: after v2.7 the cleanup model had started
 *rewriting* dictation — 14% of outputs kept less than 70% of what was said.
@@ -450,7 +462,7 @@ Both are adjustable in **Config → Wake Word** (match-strictness slider + "Requ
 | `LLM_BRAIN_SECONDARY` | The 2nd cleanup LLM, e.g. `ollama` (local) next to Groq | `""` |
 | `BRAIN_GRACE_SEC` | After the first good result, how long to wait for the other engine | `1.5` |
 
-### Auto-select & fidelity
+### Auto-select, fidelity & vocabulary
 
 | Setting | Description | Default |
 |---------|-------------|---------|
@@ -459,6 +471,9 @@ Both are adjustable in **Config → Wake Word** (match-strictness slider + "Requ
 | `LLM_AUTO_CANDIDATES` | Engines raced per dictation | `3` |
 | `LLM_AUTO_MAX_WAIT_SEC` | Longest a paste waits for auto-select | `10` |
 | `LLM_AUTO_GRACE_SEC` | After the first good result, how long to wait for better ones | `2` |
+| `VOCAB_AUTO_LEARN` | Learn your names / products / corrections automatically and feed them to the engines | `true` |
+| `VOCAB_MAX_TERMS` | Most learned words fed per dictation (pinned and your own first) | `50` |
+| `VOCAB_FORGET_DAYS` | Words learned only by repetition drop out after this many days unused | `90` |
 | `LLM_FIDELITY_FLOOR` | Re-run (then fall back to your own words) when a cleanup keeps less than this share of what you said; `0` = off | `0.65` |
 
 ### Local & Offline
@@ -563,6 +578,7 @@ nibcast/
 ├── local_models.py      Detect local LLM servers (Ollama, LM Studio, …) + warm-up
 ├── hybrid.py            Run two (or N) engines at once, first good result wins
 ├── auto_select.py       LLM_AUTO_SELECT: discover, race and rank cleanup engines
+├── vocabulary.py        Learned vocabulary: collect, guard, and feed your words
 ├── wake_engine.py       Local wake-word keyword spotter (sherpa-onnx)
 ├── live_preview.py      Live text caption while you speak
 ├── media_control.py     Pause / resume playing media around dictation
