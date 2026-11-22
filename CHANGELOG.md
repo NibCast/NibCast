@@ -5,6 +5,22 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
+## [2.9.1] — 2026-11-22
+
+### Fixed — adding a Claude (Anthropic) key
+- **Keys typed in QUICK ADD — ALL API KEYS weren't saved by SAVE.** Only the
+  TEST button saved them, so a pasted key silently disappeared. They now save
+  as soon as you leave the box, and SAVE includes them too.
+- **TEST on a provider tested a different one.** With Auto-select or Hybrid
+  cleanup on, "Test" ran your normal cleanup path, so testing Anthropic could
+  report Groq's answer as a pass. It now calls the provider you're testing and
+  explains a failure (bad key, retired model, …).
+- **Retired Claude 3 models.** The default and the dashboard choices are now
+  Claude Haiku 5.5 (recommended for cleanup), Sonnet 5.5 and Opus 5.5; a saved
+  `claude-3-…` model is upgraded on start instead of failing every cleanup.
+- **Auto-select can use Claude.** Anthropic's model list is read like the other
+  providers', so a Claude key is picked up automatically (Haiku, then Sonnet).
+
 ## [2.9.0] — 2026-11-22
 
 ### Added — learned vocabulary (`vocabulary.py`, Config → LEARNED WORDS)

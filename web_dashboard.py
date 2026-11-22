@@ -1077,7 +1077,7 @@ def api_get_config():
         "OPENAI_LLM_MODEL": getattr(config, "OPENAI_LLM_MODEL", "gpt-4o-mini"),
         "ANTHROPIC_API_KEY_MASKED": _mask_key(ak),
         "ANTHROPIC_API_KEY_SET":    bool(ak),
-        "ANTHROPIC_LLM_MODEL": getattr(config, "ANTHROPIC_LLM_MODEL", "claude-3-5-haiku-20241022"),
+        "ANTHROPIC_LLM_MODEL": getattr(config, "ANTHROPIC_LLM_MODEL", "claude-haiku-5-5"),
         "CEREBRAS_API_KEY_MASKED": _mask_key(getattr(config, "CEREBRAS_API_KEY", "") or ""),
         "CEREBRAS_API_KEY_SET":    bool(getattr(config, "CEREBRAS_API_KEY", "")),
         "CEREBRAS_LLM_MODEL": getattr(config, "CEREBRAS_LLM_MODEL", "llama-3.3-70b"),
@@ -1716,10 +1716,15 @@ def _run_test_llm():
             return jsonify({"ok": False, "error": "CUSTOM_LLM_URL not set"})
 
     try:
+        # Call THIS provider directly. tp.clean() follows auto-select / hybrid,
+        # so testing "Anthropic" used to report Groq's answer as a pass.
+        import text_processor as _tpm
         tp = TextProcessor()
-        result = tp.clean(test_input)
+        result = tp._run_backend(_tpm._PROMPT_FLOW.format(hint=""), test_input, n, allow_stream=False)
         if not result:
-            return jsonify({"ok": False, "error": f"LLM backend '{backend}' returned empty — check key and model"})
+            import health as _h
+            why = _h.explain_llm_status(f"basic:{tp._fail_reason or 'empty'}") or "returned nothing"
+            return jsonify({"ok": False, "error": f"{backend}: {why} — check the key and model"})
         return jsonify({
             "ok":      True,
             "backend": backend,

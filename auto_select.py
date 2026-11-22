@@ -48,7 +48,7 @@ PREFERRED = {
     "gemini":    ["gemini-2.5-flash", "gemini-2.0-flash"],
     "openai":    ["gpt-4.1-mini", "gpt-4o-mini"],
     "nvidia":    ["meta/llama-3.3-70b-instruct", "openai/gpt-oss-120b"],
-    "anthropic": [],
+    "anthropic": ["claude-haiku-5-5", "claude-sonnet-5-5"],
     "ollama":    [],
     "custom":    [],
 }
@@ -132,7 +132,16 @@ def _list_models(provider: str, params: dict):
     if hit and now - hit[0] < (_MODELS_TTL if hit[1] is not None else 300):
         return hit[1]
     ids = None
-    if params.get("kind") == "openai_compat" and params.get("url"):
+    if provider == "anthropic":
+        try:
+            r = requests.get("https://api.anthropic.com/v1/models",
+                             headers={"x-api-key": getattr(config, "ANTHROPIC_API_KEY", ""),
+                                      "anthropic-version": "2023-06-01"}, timeout=6)
+            if r.status_code == 200:
+                ids = {str(m.get("id", "")) for m in (r.json().get("data") or [])} - {""}
+        except Exception:
+            ids = None
+    elif params.get("kind") == "openai_compat" and params.get("url"):
         try:
             headers = {"Authorization": f"Bearer {params['key']}"} if params.get("key") else {}
             r = requests.get(_models_url(params["url"]), headers=headers,
@@ -153,6 +162,9 @@ def _match(model: str, avail: set):
     for a in avail:
         if a.split("/")[-1] == tail:
             return a
+    for a in sorted(avail):                  # dated ids: claude-haiku-5-5-20260…
+        if a.startswith(model + "-"):
+            return a
     return None
 
 
@@ -169,7 +181,7 @@ def candidates() -> list:
             continue
         configured = (getattr(config, "ANTHROPIC_LLM_MODEL", "") if prov == "anthropic"
                       else params.get("model", ""))
-        avail = None if prov == "anthropic" else _list_models(prov, params)
+        avail = _list_models(prov, params)
         if avail is None and prov in _LOCAL:
             continue                      # local server isn't running
         models = []

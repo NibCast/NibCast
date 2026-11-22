@@ -1475,7 +1475,12 @@ function saveConfig() {
 
   cfg.OPENAI_ASR_MODEL = document.getElementById('cfgOpenaiAsrModel')?.value || 'whisper-1';
   cfg.OPENAI_LLM_MODEL = document.getElementById('cfgOpenaiLlmModel')?.value || 'gpt-4o-mini';
-  cfg.ANTHROPIC_LLM_MODEL = document.getElementById('cfgAnthropicModel')?.value || 'claude-3-5-haiku-20241022';
+  // Keys typed in QUICK ADD are saved by SAVE too (they used to be saved only by TEST).
+  Object.entries(_QUICK_KEYS).forEach(([p, [cfgKey]]) => {
+    const v = (document.getElementById('qk_' + p)?.value || '').trim();
+    if (v && !cfg[cfgKey]) cfg[cfgKey] = v;
+  });
+  cfg.ANTHROPIC_LLM_MODEL = document.getElementById('cfgAnthropicModel')?.value || 'claude-haiku-5-5';
   cfg.CEREBRAS_LLM_MODEL = document.getElementById('cfgCerebrasLlmModel')?.value || 'llama-3.3-70b';
   cfg.GEMINI_LLM_MODEL = document.getElementById('cfgGeminiLlmModel')?.value || 'gemini-2.5-flash';
   cfg.OLLAMA_BASE_URL  = document.getElementById('cfgOllamaUrl')?.value?.trim() || '';
@@ -2293,7 +2298,7 @@ function buildQuickKeys(d) {
     return `<div style="display:flex;gap:8px;align-items:center">
       <span style="font-size:10px;color:var(--vf-muted);min-width:128px">${label}</span>
       <input class="cfg-in" id="qk_${p}" type="password" placeholder="${masked}"
-             style="flex:1" oninput="markUnsaved()">
+             style="flex:1" oninput="markUnsaved()" onchange="autoSaveApiKey('${_QUICK_KEYS[p][0]}', this)">
       <button class="btn-ghost" onclick="quickTestKey('${p}')"
               style="white-space:nowrap;padding:7px 10px;font-size:9px;letter-spacing:1px">TEST</button>
       <span id="qks_${p}" style="font-size:10px;min-width:64px;color:var(--vf-muted)"></span>
