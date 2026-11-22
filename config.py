@@ -132,7 +132,7 @@ BRAIN_GRACE_SEC = 1.5
 # Anthropic (LLM only)
 ANTHROPIC_API_KEY   = ""
 ANTHROPIC_LLM_URL   = "https://api.anthropic.com/v1/messages"
-ANTHROPIC_LLM_MODEL = "claude-3-5-haiku-20241022"
+ANTHROPIC_LLM_MODEL = "claude-haiku-5-5"   # fast + accurate for cleanup
 
 # Cerebras (LLM only) — FREE, OpenAI-compatible, fastest free throughput.
 # Free tier: Llama 3.3 70B / Qwen3, 30 req/min, 1M tokens/day.
@@ -468,6 +468,10 @@ def load():
         except Exception:
             # corrupted config is non-fatal — fall through to defaults
             data = {}
+
+    # Claude 3.x models are retired — a saved one would 404 on every cleanup.
+    if str(g.get("ANTHROPIC_LLM_MODEL", "")).startswith("claude-3"):
+        g["ANTHROPIC_LLM_MODEL"] = "claude-haiku-5-5"
 
     # Normalise hotkey combo formats saved by older versions.
     # Angle brackets around letter keys (<v>) are invalid pynput syntax;

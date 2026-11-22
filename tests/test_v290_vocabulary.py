@@ -194,5 +194,56 @@ class BrainJudgingTests(unittest.TestCase):
                            transcriber._transcript_quality(cut, full))
 
 
+class ClaudeKeyTests(unittest.TestCase):
+    """v2.9.1: adding an Anthropic (Claude) key actually works end to end."""
+
+    def test_retired_claude_model_is_migrated_on_load(self):
+        import json
+        tmp = tempfile.mkdtemp()
+        cfg = os.path.join(tmp, "config.json")
+        with open(cfg, "w") as f:
+            json.dump({"ANTHROPIC_LLM_MODEL": "claude-3-5-haiku-20241022"}, f)
+        with mock.patch.object(config, "CONFIG_FILE", cfg), \
+             mock.patch.object(config, "ANTHROPIC_LLM_MODEL", "x"):
+            config.load()
+            self.assertEqual(config.ANTHROPIC_LLM_MODEL, "claude-haiku-5-5")
+
+    def test_auto_select_lists_anthropic_models(self):
+        import auto_select as a
+        a._models_cache.clear()
+        class R:
+            status_code = 200
+            def json(self):
+                return {"data": [{"id": "claude-sonnet-5-5"}, {"id": "claude-haiku-5-5-20260601"}]}
+        def get(url, headers=None, timeout=None):
+            if "anthropic" in url:
+                self.assertIn("x-api-key", headers)
+                return R()
+            raise Exception("down")
+        with mock.patch.multiple(config, GROQ_API_KEY="", CEREBRAS_API_KEY="", GEMINI_API_KEY="",
+                                 OPENAI_API_KEY="", NVIDIA_API_KEY="", CUSTOM_LLM_URL="",
+                                 ANTHROPIC_API_KEY="sk-ant-x", LLM_AUTO_PROVIDERS=[], OFFLINE_MODE=False), \
+             mock.patch.object(a.requests, "get", side_effect=get):
+            self.assertEqual(a.candidates(), [("anthropic", "claude-haiku-5-5-20260601"),
+                                              ("anthropic", "claude-sonnet-5-5")])
+        a._models_cache.clear()
+
+    def test_test_llm_endpoint_tests_the_requested_provider(self):
+        import web_dashboard
+        called = []
+        def run(self_, system_prompt, raw_text, backend_name, allow_stream=True, model=None):
+            called.append(backend_name)
+            return "I was trying to check whether the Groq API is working properly."
+        c = web_dashboard.app.test_client()
+        with mock.patch.object(web_dashboard.auth, "is_configured", return_value=True), \
+             mock.patch.object(tp.TextProcessor, "_run_backend", run), \
+             mock.patch.multiple(config, ANTHROPIC_API_KEY="sk-ant-x", LLM_AUTO_SELECT=True):
+            with c.session_transaction() as s:
+                s["vf_auth"] = True
+            d = c.post("/api/test-llm", json={"backend": "anthropic"}).get_json()
+        self.assertTrue(d["ok"], d)
+        self.assertEqual(called, ["anthropic"])
+
+
 if __name__ == "__main__":
     unittest.main()

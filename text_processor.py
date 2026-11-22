@@ -1198,7 +1198,7 @@ class TextProcessor:
             return ""
 
         url   = getattr(config, "ANTHROPIC_LLM_URL",   "https://api.anthropic.com/v1/messages")
-        model = model or getattr(config, "ANTHROPIC_LLM_MODEL", "claude-3-5-haiku-20241022")
+        model = model or getattr(config, "ANTHROPIC_LLM_MODEL", "claude-haiku-5-5")
 
         headers = {
             "x-api-key":         key,
@@ -1306,7 +1306,7 @@ class TextProcessor:
             return None
 
         url   = getattr(config, "ANTHROPIC_LLM_URL",   "https://api.anthropic.com/v1/messages")
-        model = getattr(config, "ANTHROPIC_LLM_MODEL", "claude-3-5-haiku-20241022")
+        model = getattr(config, "ANTHROPIC_LLM_MODEL", "claude-haiku-5-5")
         headers = {
             "x-api-key":         key,
             "anthropic-version": "2023-06-01",
