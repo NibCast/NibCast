@@ -5,9 +5,54 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)
 
 ---
 
-## [Unreleased]
+## [2.8.0] — 2026-11-22
+
+### Output quality (dictation cleanup)
+- **Cleanup no longer rewrites what you said.** The *flow* prompt was telling the
+  model to restructure and "fix" sentences, and `openai/gpt-oss-120b` took that as
+  licence to summarise: in November 14% of dictations kept less than 70% of the
+  speaker's words (Wispr Flow on the same speaker: 2%). The prompt is now an
+  *edit, don't rewrite* brief — keep the speaker's words and order, remove only
+  fillers / stutters / false starts, fix grammar and punctuation minimally.
+- **Fidelity score + guard.** `text_processor._fidelity()` measures how much of
+  what was said survives (word-level, fillers ignored; faithful edits score
+  0.85–0.95). The Brain/hybrid scorer now weighs it heavily, and a cleanup below
+  `LLM_FIDELITY_FLOOR` (0.65) is re-run in verbatim style; if it is still far off,
+  your own words are pasted with basic cleanup (`llm_status = basic:drift`).
+- **Reasoning models stop returning empty text.** gpt-oss / qwen3 get low
+  reasoning effort, hidden reasoning and an output budget sized to the dictation;
+  empty content is retried once with a bigger budget, and providers that reject
+  the reasoning options are retried without them. Previously an empty reply made
+  the hybrid race wait the full timeout (up to ~35 s) and paste uncleaned text.
+
+### Added
+- **`LLM_AUTO_SELECT`** (Config → AI Backend → AUTO-SELECT LLM, or config.json).
+  No manual model choice: each dictation is cleaned by up to
+  `LLM_AUTO_CANDIDATES` engines from the providers you've configured, models are
+  taken from what each provider currently lists (retired names drop out), results
+  are scored for fidelity + polish and the best is pasted. Per-engine stats in
+  `~/.nibcast/llm_auto_stats.json` steer later picks; engines failing 3× in a row
+  sit out 10 min, doubling with each further failure (max 6 h). A provider whose
+  catalogue lists none of the preferred ids falls back to a strong general model
+  it does list. The available engines are logged whenever they change. Limit
+  providers with `LLM_AUTO_PROVIDERS`. Off by default — it sends the transcript
+  to every configured provider.
+- **Deepgram keyterm prompting.** The `WHISPER_PROMPT` vocabulary (plus
+  "NibCast") is sent to nova-3 as `keyterm`s, so names like "NibCast" stop
+  coming back as "new cast". Retried without them if Deepgram rejects them.
+- Cleanup vocabulary now maps "nib cast" / "new cast" (when it names the app) →
+  NibCast and "read me" / "write me" file → README.
+- `hybrid.race_many()` — the N-engine version of `race_two()`.
+- `tests/test_v280_quality.py` — tests for all of the above.
 
 ### Fixed
+- **Voice mode no longer goes quietly silent.** Clips heard without the wake
+  phrase, or rejected by Voice Match just under the threshold, used to vanish
+  with no sign. They are now counted in System Health ("Voice mode ignored you N
+  times in the last 10 minutes — why"), and when it was clearly you dictating the
+  widget shows a short hint (throttled to once every 90 s).
+
+### Fixed (since 2.7.1)
 - **A dropdown no longer silently discards a setting it doesn't recognise.**
   `setSelectValue` left the first option selected when the saved value wasn't
   among the choices, so the next SAVE wrote that first option back — a model a

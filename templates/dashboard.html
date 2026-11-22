@@ -1183,6 +1183,18 @@
         </div>
       </div>
       <div class="cfg-row">
+        <div class="cfg-key">AUTO-SELECT LLM</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togLlmAutoSelect" onclick="toggleCfg('LLM_AUTO_SELECT'); markUnsaved()">
+            <div class="tog"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <div>
+              <span class="cfg-tog-lbl">Pick the best cleanup model for me — race the top engines you've set up and paste the most faithful, best-written result</span>
+              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Overrides the LLM backend above and Hybrid cleanup. Your text goes to every provider you've added a key for (limit with LLM_AUTO_PROVIDERS in config.json). Waits at most 10 s.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="cfg-row">
         <div class="cfg-key">HYBRID CLEANUP</div>
         <div class="cfg-val">
           <select class="cfg-select" id="cfgLlmBrainSecondary" onchange="markUnsaved()">

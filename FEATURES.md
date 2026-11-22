@@ -73,10 +73,17 @@ your own words; emails get greeting / body / sign-off on their own lines.
 
 ### Writing styles
 Choose how the cleanup reshapes your speech:
-- **Flow** — clean prose, light restructuring (default)
+- **Flow** — your own words, cleaned: fillers and false starts out, grammar and punctuation fixed, nothing paraphrased (default)
 - **Verbatim** — minimal touch; only filler removal + punctuation
 - **Professional** — formal, polished
 - **Concise** — trimmed to the essential point
+
+### Auto-select & fidelity guard
+Turn on **AUTO-SELECT LLM** and NibCast picks the cleanup model for you: it races
+the best engines among the providers you've configured, scores every result for
+fidelity (did it keep what you said?) and polish, pastes the best, and learns
+which engine wins for you. Independently, a fidelity guard re-runs any cleanup
+that paraphrased you, and pastes your own words if it still drifts.
 
 ### Hybrid / Brain Mode (optional)
 Run two engines in parallel and automatically keep the better result — for

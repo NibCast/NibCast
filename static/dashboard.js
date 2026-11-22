@@ -26,6 +26,7 @@ const TOGGLE_MAP = {
   togAudioCueStop:      'AUDIO_CUE_STOP',
   togAudioCueError:     'AUDIO_CUE_ERROR',
   togBrainMode:         'BRAIN_MODE',
+  togLlmAutoSelect:     'LLM_AUTO_SELECT',
   togStartMinimized:    'START_MINIMIZED',
   togShowWidgetOnStart: 'SHOW_WIDGET_ON_START',
   togPrivacyMode:       'PRIVACY_MODE',
@@ -45,6 +46,7 @@ const _cfgToggles = {
   AUDIO_CUE_ERROR:    true,
   WAKE_WORD_ENABLED:  false,
   BRAIN_MODE:         false,
+  LLM_AUTO_SELECT:    false,
   START_MINIMIZED:    false,
   SHOW_WIDGET_ON_START: true,
   PRIVACY_MODE:       false,
@@ -957,6 +959,7 @@ function loadConfig() {
       if (d.GROQ_ASR_MODEL) setSelectValue('cfgGroqAsrModel', d.GROQ_ASR_MODEL);
       if (d.GROQ_LLM_MODEL) setSelectValue('cfgGroqLlmModel', d.GROQ_LLM_MODEL);
       if (d.BRAIN_MODE !== undefined) setToggle('BRAIN_MODE', d.BRAIN_MODE);
+      if (d.LLM_AUTO_SELECT !== undefined) setToggle('LLM_AUTO_SELECT', d.LLM_AUTO_SELECT);
       if (d.ASR_BRAIN_SECONDARY) setSelectValue('cfgBrainSecondary', d.ASR_BRAIN_SECONDARY);
       // Show the hybrid engine only while hybrid is actually on, so saving the
       // form can't silently opt in to a leftover secondary from an old config.
@@ -1373,6 +1376,7 @@ function saveConfig() {
   cfg.GROQ_LLM_MODEL = document.getElementById('cfgGroqLlmModel')?.value || 'openai/gpt-oss-20b';
 
   cfg.BRAIN_MODE = _cfgToggles.BRAIN_MODE;
+  cfg.LLM_AUTO_SELECT = _cfgToggles.LLM_AUTO_SELECT;
   cfg.ASR_BRAIN_SECONDARY = document.getElementById('cfgBrainSecondary')?.value || 'openai';
   { const e = document.getElementById('cfgLlmBrainSecondary'); if (e) cfg.LLM_BRAIN_SECONDARY = e.value; }
 

@@ -38,6 +38,7 @@ _STATUS_TEXT = {
     "offline":        "Offline Mode blocked a cloud LLM",
     "error":          "the cleanup LLM returned an error",
     "empty":          "the cleanup LLM returned nothing",
+    "drift":          "the cleanup changed what you said too much, so your own words were pasted with basic cleanup",
 }
 
 
@@ -363,6 +364,20 @@ def check_wake() -> list:
                           "Background sounds are sent to your cloud speech service to check for the phrase. "
                           "The local wake engine is faster and private." if cloud else "",
                           [("Use the local wake engine", "wake_kws")] if cloud else ()))
+    import state as _st
+    ignored = _st.voice_ignored_recent(600)
+    if len(ignored) >= 3:
+        nw = sum(1 for e in ignored if e[1] == "no_wake")
+        sp = [e[2] for e in ignored if e[1] == "speaker"]
+        bits = []
+        if nw:
+            bits.append(f"{nw}× speech without the wake phrase \"{phrase}\" (say it first, or use a hotkey)")
+        if sp:
+            bits.append(f"{len(sp)}× voice match too low (last: {sp[-1]}) — if that was you, lower the "
+                        f"match strictness or re-enroll; background noise drags the score down")
+        out.append(_check("voice_ignored", "Voice activation", "warn",
+                          f"Voice mode ignored you {len(ignored)} times in the last 10 minutes",
+                          "; ".join(bits) + "."))
     try:
         import voice_enrollor
         enrolled = voice_enrollor.is_enrolled()

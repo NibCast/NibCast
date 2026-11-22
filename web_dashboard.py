@@ -1021,6 +1021,7 @@ def api_get_config():
         "ASR_BACKEND": getattr(config, "ASR_BACKEND", "groq"),
         "LLM_BACKEND": getattr(config, "LLM_BACKEND", "groq"),
         "LLM_FALLBACK_BACKEND": getattr(config, "LLM_FALLBACK_BACKEND", ""),
+        "LLM_AUTO_SELECT":      getattr(config, "LLM_AUTO_SELECT", False),
         "GROQ_API_KEY_MASKED": _mask_key(getattr(config, "GROQ_API_KEY", "") or ""),
         "GROQ_API_KEY_SET":    bool(getattr(config, "GROQ_API_KEY", "")),
         "GROQ_ASR_MODEL": getattr(config, "GROQ_ASR_MODEL", "whisper-large-v3-turbo"),
@@ -1232,6 +1233,8 @@ def api_save_config():
             setattr(config, k, data[k])
     if "BRAIN_MODE" in data:
         config.BRAIN_MODE = bool(data["BRAIN_MODE"])
+    if "LLM_AUTO_SELECT" in data:
+        config.LLM_AUTO_SELECT = bool(data["LLM_AUTO_SELECT"])
     if "LLM_BRAIN_SECONDARY" in data:
         # The HYBRID CLEANUP picker is the opt-in: "Off" clears it.
         config.LLM_HYBRID = bool(data["LLM_BRAIN_SECONDARY"])

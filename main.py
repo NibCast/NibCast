@@ -1,7 +1,7 @@
 # ============================================================
 #  NibCast — Main Entry Point
 # ============================================================
-__version__ = "2.7.1"
+__version__ = "2.8.0"
 
 import sys
 
@@ -574,6 +574,37 @@ def on_vad_press():
             _vad_is_command_recording = False
 
 
+_last_voice_hint_at = 0.0
+
+
+def _voice_ignored(kind: str, words: int = 0, score: float | None = None, thr: float | None = None):
+    """A voice-mode clip was heard but not pasted. Record it for System Health,
+    and — throttled, and only when it was clearly someone dictating — show a
+    short hint on the widget so the mic doesn't just seem to go silent."""
+    global _last_voice_hint_at
+    phrase = (getattr(config, "WAKE_WORD", "") or "").strip()
+    if kind == "no_wake":
+        detail = f"{words} word(s) heard without the wake phrase"
+        label, msg = (f'SAY "{phrase.upper()}"',
+                      f'Voice mode heard {words} words but ignored them: start with the wake '
+                      f'phrase "{phrase}", or use your dictation hotkey.')
+        worth_showing = words >= 6
+    else:
+        detail = f"voice match {score:.2f} < {thr}"
+        label, msg = ("VOICE NOT RECOGNIZED",
+                      f"Voice match {score:.2f} is below the required {thr}, so this was ignored. "
+                      f"If it was you, lower the match strictness in Config → Wake Word or re-enroll "
+                      f"your voice (background noise lowers the score).")
+        worth_showing = score is not None and thr is not None and score >= thr - 0.12
+    state.note_voice_ignored(kind, detail)
+    if worth_showing and time.time() - _last_voice_hint_at > 90:
+        _last_voice_hint_at = time.time()
+        widget.show_error(label)
+        state.set_notice(msg)
+        return True
+    return False
+
+
 def _notify_if_uncleaned(llm_status: str):
     """The text was pasted, but without LLM cleanup — say so, and why, every
     time (widget + dashboard status), instead of leaving the user guessing.
@@ -886,7 +917,9 @@ def _run_release_pipeline():
             _ok, _score = _ve.verify(wav_bytes, getattr(config, "VOICE_SIMILARITY_THRESHOLD", 0.62))
             if not _ok:
                 log.info(f"Speaker verify: rejected (score={_score:.2f}) — not the enrolled voice")
-                widget.hide()
+                _thr1 = getattr(config, "VOICE_SIMILARITY_THRESHOLD", 0.62)
+                if not _voice_ignored("speaker", score=_score, thr=_thr1):
+                    widget.hide()
                 if voice_act is not None:
                     voice_act.set_cooldown(0.3)
                 return
@@ -1037,7 +1070,8 @@ def _run_release_pipeline():
                 error="wake word not found",
             )
             state.set_state("idle")
-            widget.hide()
+            if not _voice_ignored("no_wake", words=len((raw_text or "").split())):
+                widget.hide()
             return
 
     # Phase 2 ambient guard: a false-positive wake confirmation followed by
