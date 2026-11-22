@@ -78,6 +78,14 @@ Choose how the cleanup reshapes your speech:
 - **Professional** — formal, polished
 - **Concise** — trimmed to the essential point
 
+### Learned vocabulary
+NibCast builds your word list for you: names, acronyms and products you keep
+saying, words the cleanup or you had to correct, and your Wispr Flow dictionary
+(one click). The list goes to Deepgram, Whisper and the cleanup model with every
+dictation, along with how each word tends to be misheard. Review it under
+**Config → LEARNED WORDS** — pin, remove for good, or add your own. Ordinary
+English words are never learned, and it all stays on your computer.
+
 ### Auto-select & fidelity guard
 Turn on **AUTO-SELECT LLM** and NibCast picks the cleanup model for you: it races
 the best engines among the providers you've configured, scores every result for

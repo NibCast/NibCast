@@ -22,15 +22,51 @@ import config
 from logger import log, redact
 
 
+# ── Brain Mode: judging two transcripts ──────────────────────
+
+def _transcript_quality(text: str, other: str, vocab=()) -> float:
+    """Higher = better. Compares one transcript of a clip against the other
+    engine's transcript of the same clip."""
+    import re as _re
+    words = text.split()
+    n, m = len(words), len(other.split())
+    if not n:
+        return -1e9
+    score = 0.0
+    # Completeness: dropping a big chunk of what the other engine heard is bad…
+    if m and n / m < 0.8:
+        score -= 40.0 * (0.8 - n / m)
+    # …but so is structure-free output: Whisper's long-form failure is a
+    # lower-case, unpunctuated run-on.
+    ends = len(_re.findall(r"[.!?…](?:\s|$)", text))
+    if n >= 25 and ends == 0:
+        score -= 30.0
+    elif ends:
+        avg = n / ends
+        if avg > 40:
+            score -= min(15.0, (avg - 40) / 4)
+    if text[:1].islower():
+        score -= 3.0
+    # Looping repeats ("the the the", a phrase said three times) = hallucination.
+    score -= 5.0 * len(_re.findall(r"\b(\w+(?:\s+\w+){0,3})(?:[\s,]+\1\b){2,}", text, _re.IGNORECASE))
+    # Known names spelled right.
+    for t in vocab or ():
+        if t and t in text:
+            score += 1.5
+    score += 0.02 * n            # tie-break: the fuller one
+    return score
+
+
 # ── Deepgram keyterms ────────────────────────────────────────
 
-def _keyterms(vocab: str, limit: int = 50) -> list:
-    """WHISPER_PROMPT ("NibCast, Claude Code, Groq" or one per line) → a
-    de-duplicated term list for Deepgram keyterm prompting. The app's own name
-    is always included — it's the word speech engines miss most here."""
+def _keyterms(vocab: str, limit: int = 50, learned=()) -> list:
+    """WHISPER_PROMPT ("NibCast, Claude Code, Groq" or one per line) plus the
+    learned vocabulary → a de-duplicated term list for Deepgram keyterm
+    prompting. The app's own name is always included — it's the word speech
+    engines miss most here. Your own list comes before learned words."""
     import re as _re
     out, seen = [], set()
-    for t in ["NibCast"] + _re.split(r"[,\n;]+", vocab or ""):
+    for t in ["NibCast"] + _re.split(r"[,\n;]+", vocab or "") + list(learned):
         t = t.strip().strip(".")
         if t and len(t) <= 40 and t.lower() not in seen:
             seen.add(t.lower())
@@ -364,10 +400,19 @@ class Transcriber:
             log.info(f"🧠 Brain winner: {primary['name']} ({s['name']} looked like a hallucination)")
             return r1
 
-        w1 = len(r1.split())
-        w2 = len(r2.split())
-        winner = r1 if w1 >= w2 else r2
-        log.info(f"🧠 Brain winner: {w1} vs {w2} words → {primary['name'] if w1>=w2 else s['name']}")
+        # Judge the transcripts, don't just count words. "More words wins" picked
+        # Whisper's long-form failure mode — a lower-case, unpunctuated run-on
+        # with extra garbled words — over Deepgram's clean transcript.
+        try:
+            import vocabulary
+            vocab = vocabulary.active_terms()
+        except Exception:
+            vocab = []
+        q1, q2 = _transcript_quality(r1, r2, vocab), _transcript_quality(r2, r1, vocab)
+        winner = r1 if q1 >= q2 else r2
+        log.info(f"🧠 Brain winner: [{primary['name']}] {q1:.1f} vs [{s['name']}] {q2:.1f} "
+                 f"({len(r1.split())} vs {len(r2.split())} words) → "
+                 f"{primary['name'] if q1 >= q2 else s['name']}")
         return winner
 
     # ── Single backend HTTP call ───────────────────────────────
@@ -401,7 +446,12 @@ class Transcriber:
         # Keyterm prompting (nova-3): bias recognition toward the speaker's own
         # names and jargon — the same list Whisper gets as its prompt — so
         # "NibCast" stops coming back as "new cast". Dropped once if rejected.
-        terms = _keyterms(getattr(config, "WHISPER_PROMPT", ""))
+        try:
+            import vocabulary
+            learned = vocabulary.keyterms()
+        except Exception:
+            learned = []
+        terms = _keyterms(getattr(config, "WHISPER_PROMPT", ""), learned=learned)
         if terms and str(model).startswith("nova-3"):
             params["keyterm"] = terms
 

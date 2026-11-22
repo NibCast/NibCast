@@ -27,6 +27,7 @@ const TOGGLE_MAP = {
   togAudioCueError:     'AUDIO_CUE_ERROR',
   togBrainMode:         'BRAIN_MODE',
   togLlmAutoSelect:     'LLM_AUTO_SELECT',
+  togVocabAutoLearn:    'VOCAB_AUTO_LEARN',
   togStartMinimized:    'START_MINIMIZED',
   togShowWidgetOnStart: 'SHOW_WIDGET_ON_START',
   togPrivacyMode:       'PRIVACY_MODE',
@@ -47,6 +48,7 @@ const _cfgToggles = {
   WAKE_WORD_ENABLED:  false,
   BRAIN_MODE:         false,
   LLM_AUTO_SELECT:    false,
+  VOCAB_AUTO_LEARN:   true,
   START_MINIMIZED:    false,
   SHOW_WIDGET_ON_START: true,
   PRIVACY_MODE:       false,
@@ -187,6 +189,81 @@ async function applyHealthFix(action, btn) {
     if (msg) { msg.textContent = 'Fix failed: ' + e; msg.style.color = '#ff6b6b'; }
   } finally {
     if (btn) btn.disabled = false;
+  }
+}
+
+// ── Learned vocabulary ───────────────────────────────────────
+const _VOCAB_SRC = { repeat: 'you say it often', correct: 'corrected', edit: 'you edited it',
+                     wispr: 'from Wispr Flow', manual: 'added by you' };
+
+function _vocabAttr(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function renderVocabulary(words) {
+  const box = document.getElementById('vocabList');
+  if (!box) return;
+  if (!box.dataset.wired) {          // one delegated listener — no inline handlers
+    box.dataset.wired = '1';
+    box.addEventListener('click', ev => {
+      const a = ev.target.closest('[data-vact]');
+      if (!a) return;
+      ev.preventDefault();
+      vocabAction(a.dataset.vact, a.dataset.term);
+    });
+  }
+  if (!words || !words.length) {
+    box.innerHTML = '<span style="font-size:10px;color:var(--vf-muted)">No learned words yet — they appear after a few dictations.</span>';
+    return;
+  }
+  box.innerHTML = words.map(w => {
+    const blocked = w.status === 'blocked', pinned = w.status === 'pinned';
+    const t = _vocabAttr(w.term);
+    const tip = _vocabAttr(`${_VOCAB_SRC[w.source] || w.source}` +
+      (w.dictations ? ` · in ${w.dictations} dictation(s)` : '') +
+      (w.misheard && w.misheard.length ? ` · heard as: ${w.misheard.join(', ')}` : '') +
+      (blocked ? ' · removed' : (w.in_use ? ' · in use' : ' · not in use (over the limit)')));
+    const style = 'display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:10px;font-size:11px;' +
+      'border:1px solid ' + (pinned ? 'var(--vf-cyan)' : 'var(--vf-b0)') + ';' +
+      (blocked ? 'opacity:.45;text-decoration:line-through;' : '') + (w.in_use || blocked ? '' : 'opacity:.7;');
+    const btn = (act, label, title) => `<a href="#" data-vact="${act}" data-term="${t}" title="${title}">${label}</a>`;
+    const btns = blocked ? btn('restore', '↺', 'Restore')
+      : btn(pinned ? 'unpin' : 'pin', pinned ? '★' : '☆', pinned ? 'Unpin' : 'Pin — always use') +
+        btn('remove', '✕', 'Remove for good');
+    return `<span title="${tip}" style="${style}">${t}${btns}</span>`;
+  }).join('');
+}
+
+async function loadVocabulary() {
+  try {
+    const d = await (await fetch('/api/vocabulary')).json();
+    if (d.ok) renderVocabulary(d.words);
+  } catch (e) { /* dashboard still loading */ }
+}
+
+async function vocabAction(action, term) {
+  const msg = document.getElementById('vocabMsg');
+  const body = { action };
+  if (action === 'add') {
+    body.term = (document.getElementById('vocabAddTerm')?.value || '').trim();
+    body.misheard = (document.getElementById('vocabAddMisheard')?.value || '').trim();
+    if (!body.term) return;
+  } else if (term !== undefined) {
+    body.term = term;
+  }
+  try {
+    const r = await fetch('/api/vocabulary', { method: 'POST', headers: {'Content-Type': 'application/json'},
+                                               body: JSON.stringify(body) });
+    const d = await r.json();
+    renderVocabulary(d.words);
+    if (msg) { msg.textContent = d.message || ''; msg.style.color = d.ok ? 'var(--vf-cyan)' : 'var(--vf-orange)'; }
+    if (action === 'add' && d.ok) {
+      document.getElementById('vocabAddTerm').value = '';
+      document.getElementById('vocabAddMisheard').value = '';
+    }
+  } catch (e) {
+    if (msg) { msg.textContent = 'Failed: ' + e; msg.style.color = '#ff6b6b'; }
   }
 }
 
@@ -960,6 +1037,8 @@ function loadConfig() {
       if (d.GROQ_LLM_MODEL) setSelectValue('cfgGroqLlmModel', d.GROQ_LLM_MODEL);
       if (d.BRAIN_MODE !== undefined) setToggle('BRAIN_MODE', d.BRAIN_MODE);
       if (d.LLM_AUTO_SELECT !== undefined) setToggle('LLM_AUTO_SELECT', d.LLM_AUTO_SELECT);
+      if (d.VOCAB_AUTO_LEARN !== undefined) setToggle('VOCAB_AUTO_LEARN', d.VOCAB_AUTO_LEARN);
+      loadVocabulary();
       if (d.ASR_BRAIN_SECONDARY) setSelectValue('cfgBrainSecondary', d.ASR_BRAIN_SECONDARY);
       // Show the hybrid engine only while hybrid is actually on, so saving the
       // form can't silently opt in to a leftover secondary from an old config.
@@ -1377,6 +1456,7 @@ function saveConfig() {
 
   cfg.BRAIN_MODE = _cfgToggles.BRAIN_MODE;
   cfg.LLM_AUTO_SELECT = _cfgToggles.LLM_AUTO_SELECT;
+  cfg.VOCAB_AUTO_LEARN = _cfgToggles.VOCAB_AUTO_LEARN;
   cfg.ASR_BRAIN_SECONDARY = document.getElementById('cfgBrainSecondary')?.value || 'openai';
   { const e = document.getElementById('cfgLlmBrainSecondary'); if (e) cfg.LLM_BRAIN_SECONDARY = e.value; }
 

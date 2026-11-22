@@ -352,6 +352,46 @@ def api_history():
     ))
 
 
+# ── Learned vocabulary ──────────────────────────────────────
+@app.route("/api/vocabulary")
+def api_vocabulary():
+    import vocabulary
+    return jsonify({"ok": True, "words": vocabulary.list_all(),
+                    "auto_learn": getattr(config, "VOCAB_AUTO_LEARN", True),
+                    "max_terms": getattr(config, "VOCAB_MAX_TERMS", 50)})
+
+
+@app.route("/api/vocabulary", methods=["POST"])
+def api_vocabulary_change():
+    """{action: add|pin|unpin|remove|restore|import_wispr|relearn, term?, misheard?}"""
+    import vocabulary
+    data = request.get_json(force=True, silent=True) or {}
+    action = str(data.get("action", ""))
+    term = str(data.get("term", "")).strip()
+    try:
+        if action == "add":
+            ok = vocabulary.add(term, str(data.get("misheard", "")))
+            msg = f"Added “{term}”" if ok else "Enter a word or short phrase (max 40 characters)"
+        elif action in ("pin", "unpin", "remove", "restore"):
+            status = {"pin": "pinned", "unpin": "active", "remove": "blocked", "restore": "active"}[action]
+            ok = vocabulary.set_status(term, status)
+            msg = {"pin": "Pinned — always used", "unpin": "Unpinned",
+                   "remove": "Removed — it won't be learned again", "restore": "Restored"}[action]
+        elif action == "import_wispr":
+            n = vocabulary.import_wispr()
+            ok, msg = True, f"Imported {n} word(s) from Wispr Flow"
+        elif action == "relearn":
+            n = vocabulary.backfill(force=True)
+            ok, msg = True, f"Re-learned from {n} past dictation(s)"
+        else:
+            ok, msg = False, "unknown action"
+    except FileNotFoundError as e:
+        ok, msg = False, str(e)
+    except Exception as e:
+        ok, msg = False, f"Failed: {e}"
+    return jsonify({"ok": ok, "message": msg, "words": vocabulary.list_all()})
+
+
 @app.route("/api/history/<int:tid>", methods=["DELETE"])
 def api_delete_one(tid):
     db.delete_transcription(tid)
@@ -1022,6 +1062,7 @@ def api_get_config():
         "LLM_BACKEND": getattr(config, "LLM_BACKEND", "groq"),
         "LLM_FALLBACK_BACKEND": getattr(config, "LLM_FALLBACK_BACKEND", ""),
         "LLM_AUTO_SELECT":      getattr(config, "LLM_AUTO_SELECT", False),
+        "VOCAB_AUTO_LEARN":     getattr(config, "VOCAB_AUTO_LEARN", True),
         "GROQ_API_KEY_MASKED": _mask_key(getattr(config, "GROQ_API_KEY", "") or ""),
         "GROQ_API_KEY_SET":    bool(getattr(config, "GROQ_API_KEY", "")),
         "GROQ_ASR_MODEL": getattr(config, "GROQ_ASR_MODEL", "whisper-large-v3-turbo"),
@@ -1235,6 +1276,8 @@ def api_save_config():
         config.BRAIN_MODE = bool(data["BRAIN_MODE"])
     if "LLM_AUTO_SELECT" in data:
         config.LLM_AUTO_SELECT = bool(data["LLM_AUTO_SELECT"])
+    if "VOCAB_AUTO_LEARN" in data:
+        config.VOCAB_AUTO_LEARN = bool(data["VOCAB_AUTO_LEARN"])
     if "LLM_BRAIN_SECONDARY" in data:
         # The HYBRID CLEANUP picker is the opt-in: "Off" clears it.
         config.LLM_HYBRID = bool(data["LLM_BRAIN_SECONDARY"])

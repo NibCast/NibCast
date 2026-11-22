@@ -1,7 +1,7 @@
 # ============================================================
 #  NibCast — Main Entry Point
 # ============================================================
-__version__ = "2.8.0"
+__version__ = "2.9.0"
 
 import sys
 
@@ -146,6 +146,8 @@ if platform.system() == "Windows":
         sys.exit(0)
 
 db.init_db()
+import vocabulary
+vocabulary.backfill_async()   # first run: learn your words from past dictations
 
 recorder  = AudioRecorder()
 transcrib = Transcriber()
@@ -941,27 +943,23 @@ def _run_release_pipeline():
 
     _llm_screen_hint = ""   # set below for dictation; wake clips never read the screen
     if not is_vad_wake_phase:
-        # Whisper prompt = the user's curated dictionary (WHISPER_PROMPT — names,
-        # jargon, product terms) PLUS the vocabulary learned from past transcripts
-        # for this app. These were previously `app_vocab or _base_prompt`, so once
-        # an app had any history the user's curated terms were silently dropped —
-        # the words they added specifically to fix mishears stopped applying.
-        app_vocab = db.get_app_vocabulary(target_info.get("label", ""))
-        # Whisper copies the prompt's punctuation, so a comma-separated list makes
-        # it emit a comma after almost every word ("this, is, a, test"). Normalise
-        # the dictionary to a space-separated word list (same as app_vocab). Put the
-        # curated dictionary LAST so it survives Whisper's ~224-token prompt window
-        # if the combined hint is long. Cap to keep well under that limit.
-        _dict_ws = " ".join(_base_prompt.replace(",", " ").split())
-        # Keep the TAIL (Whisper conditions on the last tokens of the prompt) so the
-        # curated dictionary, placed last, is the part that survives if it's long.
+        # Whisper prompt = on-screen terms + learned vocabulary + the user's own
+        # dictionary (WHISPER_PROMPT), the dictionary LAST so it survives
+        # Whisper's ~224-token prompt window.
         _scr = _screen_terms()
         if _scr:
             import screen_context
             _llm_screen_hint = screen_context.prompt_hint(_scr)
-        _combined_prompt = " ".join(p for p in (app_vocab, " ".join(_scr), _dict_ws) if p)[-800:].strip()
-        if app_vocab:
-            log.info(f"📚 App vocab hint: {redact(app_vocab[:80])}…")
+        # Learned vocabulary (vocabulary.py) replaces the old per-app frequency
+        # hint, which was mostly common words ("create want application give…")
+        # and, as a bare lower-case list, primed Whisper into lower-case,
+        # unpunctuated run-ons. The prompt is now one punctuated sentence naming
+        # your terms, your own dictionary last.
+        _user_terms = [t.strip() for t in re.split(r"[,\n;]+", _base_prompt) if t.strip()]
+        _combined_prompt = vocabulary.whisper_prompt(extra_terms=_scr, user_terms=_user_terms)
+        if _combined_prompt:
+            log.info(f"📚 Vocabulary hint: {len(vocabulary.active_terms())} learned + "
+                     f"{len(_user_terms)} of yours")
     else:
         # Title-case the wake word for the Whisper prompt so it recognises it as a
         # proper noun/name, which significantly reduces phonetic substitutions.
@@ -1145,6 +1143,9 @@ def _run_release_pipeline():
         _hint = f"{_hint}\n{_llm_screen_hint}".strip()
     clean_text = processor.clean(raw_text, llm_hint=_hint)
     clean_text = _apply_rules(clean_text, target_info)
+    # What the cleanup produced, before snippets (which may hold e-mail
+    # addresses etc.) or your own edits — this is what vocabulary learns from.
+    _learn_text = clean_text
 
     # Snippet expansion: whole utterance matching a configured phrase → replacement text
     clean_text = _expand_snippets(clean_text)
@@ -1172,6 +1173,8 @@ def _run_release_pipeline():
             if tray: tray.set_idle()
             widget.hide()
             return
+        if edited != clean_text:
+            vocabulary.learn_from_edit(clean_text, edited)
         clean_text = edited
 
     global _last_paste_text, _last_paste_chars
@@ -1193,6 +1196,11 @@ def _run_release_pipeline():
         status="success",
         llm_status=processor.last_status,
     )
+    # Learn names / products / corrections from this dictation (local only).
+    # Skipped when the cleanup didn't run — basic cleanup proves nothing.
+    if not (processor.last_status or "").startswith("basic:"):
+        threading.Thread(target=vocabulary.learn, args=(raw_text, _learn_text),
+                         daemon=True, name="VocabLearn").start()
 
     state.set_state("idle")
     if tray: tray.set_idle()

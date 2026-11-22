@@ -1688,6 +1688,29 @@
         </div>
       </div>
       <div class="cfg-row">
+        <div class="cfg-key">LEARNED WORDS</div>
+        <div class="cfg-val">
+          <div class="cfg-tog-wrap" id="togVocabAutoLearn" onclick="toggleCfg('VOCAB_AUTO_LEARN'); markUnsaved()" style="margin-bottom:8px">
+            <div class="tog tog-on"><div class="tog-track"><div class="tog-thumb"></div></div></div>
+            <div>
+              <span class="cfg-tog-lbl">Learn my words automatically</span>
+              <div style="font-size:10px;color:var(--vf-muted);margin-top:2px">Names, acronyms and products you keep saying, and words the cleanup or you had to correct, are added here and sent to the speech engine and cleanup model. ★ pins a word; ✕ removes it for good.</div>
+            </div>
+          </div>
+          <div id="vocabList" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;max-height:180px;overflow:auto"></div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input class="cfg-in" id="vocabAddTerm" placeholder="Add a word, e.g. NibCast" style="flex:1;min-width:140px"
+                   onkeydown="if(event.key==='Enter')vocabAction('add')">
+            <input class="cfg-in" id="vocabAddMisheard" placeholder="often heard as… (optional)" style="flex:1;min-width:140px"
+                   onkeydown="if(event.key==='Enter')vocabAction('add')">
+            <button class="btn-ghost" onclick="vocabAction('add')" style="font-size:9px;padding:6px 12px;letter-spacing:1px">ADD</button>
+            <button class="btn-ghost" onclick="vocabAction('import_wispr')" style="font-size:9px;padding:6px 12px;letter-spacing:1px" title="Copy the words from Wispr Flow's personal dictionary (read-only)">IMPORT WISPR FLOW</button>
+            <button class="btn-ghost" onclick="vocabAction('relearn')" style="font-size:9px;padding:6px 12px;letter-spacing:1px" title="Rebuild the automatic words from your dictation history">RE-LEARN</button>
+          </div>
+          <div id="vocabMsg" style="font-size:10px;color:var(--vf-muted);margin-top:4px"></div>
+        </div>
+      </div>
+      <div class="cfg-row">
         <div class="cfg-key">CLEAN_WITH_LLM</div>
         <div class="cfg-val">
           <div class="cfg-tog-wrap" id="togCleanLlm" onclick="toggleCfg('CLEAN_WITH_LLM')">
