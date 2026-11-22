@@ -27,6 +27,26 @@ _last_notice      = ""
 _last_notice_at   = 0.0
 
 
+# Voice-activation clips that were heard but deliberately not pasted (no wake
+# phrase, voice match failed). Kept so the dashboard can say "the mic heard you
+# and ignored it, here's why" instead of the mic just appearing to go silent.
+_voice_ignored: list = []      # [(time, kind, detail)]
+
+
+def note_voice_ignored(kind: str, detail: str = ""):
+    with _lock:
+        now = time.time()
+        _voice_ignored.append((now, kind, detail))
+        while _voice_ignored and now - _voice_ignored[0][0] > 900:
+            _voice_ignored.pop(0)
+
+
+def voice_ignored_recent(window_sec: float = 600) -> list:
+    with _lock:
+        now = time.time()
+        return [e for e in _voice_ignored if now - e[0] <= window_sec]
+
+
 def set_notice(message: str):
     global _last_notice, _last_notice_at
     with _lock:

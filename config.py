@@ -58,6 +58,27 @@ LLM_BACKEND = "groq"
 # the app never silently sends your text to a provider you didn't choose.
 LLM_FALLBACK_BACKEND = ""
 
+# ── Auto-select the cleanup LLM ───────────────────────────────
+# LLM_AUTO_SELECT = True → you don't pick a model. Each dictation is cleaned
+# by the best few engines among the providers you've configured (API key set,
+# or the local server answering); every result is scored for fidelity (kept
+# your words?) and polish (grammar, punctuation, no fillers) and the best one
+# is pasted. Per-model stats (~/.nibcast/llm_auto_stats.json) steer future
+# picks toward what works best for you. LLM_BACKEND is ignored while on.
+# NOTE: the transcript goes to every configured provider — restrict with
+# LLM_AUTO_PROVIDERS, e.g. ["groq", "ollama"] (empty = all configured).
+LLM_AUTO_SELECT       = False
+LLM_AUTO_PROVIDERS: list = []
+LLM_AUTO_CANDIDATES   = 3       # engines raced per dictation
+LLM_AUTO_MAX_WAIT_SEC = 10.0    # never hold a paste longer than this
+LLM_AUTO_GRACE_SEC    = 2.0     # after the first good answer, wait this long for better ones
+
+# Fidelity floor (0–1). A cleanup that keeps less than this share of what you
+# said (word-level, ignoring fillers) is treated as a rewrite: it is re-run in
+# verbatim style, and if still too far off your own words are pasted instead.
+# Faithful edits score ~0.85–0.95. 0 disables the guard.
+LLM_FIDELITY_FLOOR = 0.65
+
 # Groq — FREE 7,200 min/day ASR, fastest Whisper, OpenAI-compatible
 GROQ_API_KEY   = ""
 GROQ_ASR_URL   = "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -364,6 +385,8 @@ _PERSISTED_KEYS = (
     "PRIVACY_MODE", "CONTEXT_AWARENESS", "HISTORY_AUTO_DELETE_DAYS",
     # Backends
     "ASR_BACKEND", "LLM_BACKEND", "LLM_FALLBACK_BACKEND",
+    "LLM_AUTO_SELECT", "LLM_AUTO_PROVIDERS", "LLM_AUTO_CANDIDATES",
+    "LLM_AUTO_MAX_WAIT_SEC", "LLM_AUTO_GRACE_SEC", "LLM_FIDELITY_FLOOR",
     "GROQ_API_KEY", "GROQ_ASR_MODEL", "GROQ_LLM_MODEL",
     "OPENAI_API_KEY", "OPENAI_ASR_MODEL", "OPENAI_LLM_MODEL",
     "ANTHROPIC_API_KEY", "ANTHROPIC_LLM_MODEL",

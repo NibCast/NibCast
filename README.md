@@ -19,7 +19,30 @@ Press a hotkey (or say a wake phrase) → speak → your words appear in any app
 
 ---
 
-## 🆕 What's New (v2.4.3 → v2.7.1)
+## 🆕 What's New in v2.8.0 — faithful, paste-ready cleanup
+
+Measured against real daily history: after v2.7 the cleanup model had started
+*rewriting* dictation — 14% of outputs kept less than 70% of what was said.
+v2.8.0 makes the cleanup an **edit, not a rewrite**, so you can paste and send
+without re-reading. Details in [CHANGELOG.md](CHANGELOG.md).
+
+- **Edit, don't rewrite** — the Flow style keeps your words and their order and only
+  removes fillers, stutters and false starts and fixes grammar and punctuation.
+- **Fidelity score + guard** — every cleanup is scored for how much of what you said it
+  kept (faithful edits: 0.85–0.95). Below `LLM_FIDELITY_FLOOR` (0.65) it is re-run in
+  verbatim style; if it still drifts, your own words are pasted.
+- **Auto-select the LLM** — turn on **Config → AI Backend → AUTO-SELECT LLM**
+  (`LLM_AUTO_SELECT`) and stop choosing models: NibCast races the best engines among the
+  providers you've set up, using only models they currently list, and pastes the most
+  faithful, best-written result. It learns which engine wins for you.
+- **No more empty replies from reasoning models** (gpt-oss, qwen3) — low reasoning effort,
+  a right-sized output budget, and one retry instead of a silent uncleaned paste.
+- **Voice mode no longer goes quietly silent** — clips ignored for a missing wake phrase or
+  a near-miss Voice Match are reported in System Health, with a short widget hint.
+- **Deepgram keyterms** — your `WHISPER_PROMPT` vocabulary (plus "NibCast") is sent to
+  nova-3 as keyterm prompts, so names stop being misheard.
+
+## What's New (v2.4.3 → v2.7.1)
 
 These releases were driven by real daily-use history: many dictations were being
 silently pasted *without* LLM cleanup, and most wake-word triggers were false.
@@ -343,6 +366,13 @@ The wake gate also **floats above the measured ambient noise floor automatically
 products. For private dictation use a paid Gemini key, or pick Groq/Cerebras. The same
 caveat applies to most no-credit-card free tiers — see [PRIVACY.md](PRIVACY.md).
 
+> 🤖 **Don't want to choose?** Turn on **AUTO-SELECT LLM** (`LLM_AUTO_SELECT = true`). Each
+> dictation is cleaned by up to 3 engines from the providers you've configured; the result
+> that keeps your words best (and reads best) is pasted, and per-engine stats in
+> `~/.nibcast/llm_auto_stats.json` steer later picks. Engines that keep failing sit out
+> (10 min, doubling). Your text goes to every configured provider — limit it with
+> `LLM_AUTO_PROVIDERS`, e.g. `["groq", "ollama"]`.
+
 > 🔁 **Never get stuck on a rate limit.** Set **Config → AI Backend → `LLM_FALLBACK`** to a
 > second free provider (e.g. primary **Groq** → fallback **Cerebras**). If your primary hits
 > its daily cap (HTTP 429), NibCast retries cleanup on the fallback instead of dropping to
@@ -419,6 +449,17 @@ Both are adjustable in **Config → Wake Word** (match-strictness slider + "Requ
 | `LLM_HYBRID` | Hybrid **cleanup**: run `LLM_BRAIN_SECONDARY` in parallel with your LLM and keep the better text (set by the HYBRID CLEANUP picker) | `false` |
 | `LLM_BRAIN_SECONDARY` | The 2nd cleanup LLM, e.g. `ollama` (local) next to Groq | `""` |
 | `BRAIN_GRACE_SEC` | After the first good result, how long to wait for the other engine | `1.5` |
+
+### Auto-select & fidelity
+
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `LLM_AUTO_SELECT` | Pick the cleanup engine automatically per dictation (overrides `LLM_BACKEND` and hybrid cleanup) | `false` |
+| `LLM_AUTO_PROVIDERS` | Only consider these providers (empty = every configured one) | `[]` |
+| `LLM_AUTO_CANDIDATES` | Engines raced per dictation | `3` |
+| `LLM_AUTO_MAX_WAIT_SEC` | Longest a paste waits for auto-select | `10` |
+| `LLM_AUTO_GRACE_SEC` | After the first good result, how long to wait for better ones | `2` |
+| `LLM_FIDELITY_FLOOR` | Re-run (then fall back to your own words) when a cleanup keeps less than this share of what you said; `0` = off | `0.65` |
 
 ### Local & Offline
 
@@ -520,7 +561,8 @@ nibcast/
 ├── logger.py            Rotating file + console logger (+ Privacy Mode redaction)
 ├── local_asr.py         In-app Whisper (faster-whisper), offline speech-to-text
 ├── local_models.py      Detect local LLM servers (Ollama, LM Studio, …) + warm-up
-├── hybrid.py            Run two engines at once, first good result wins
+├── hybrid.py            Run two (or N) engines at once, first good result wins
+├── auto_select.py       LLM_AUTO_SELECT: discover, race and rank cleanup engines
 ├── wake_engine.py       Local wake-word keyword spotter (sherpa-onnx)
 ├── live_preview.py      Live text caption while you speak
 ├── media_control.py     Pause / resume playing media around dictation

@@ -22,6 +22,22 @@ import config
 from logger import log, redact
 
 
+# ── Deepgram keyterms ────────────────────────────────────────
+
+def _keyterms(vocab: str, limit: int = 50) -> list:
+    """WHISPER_PROMPT ("NibCast, Claude Code, Groq" or one per line) → a
+    de-duplicated term list for Deepgram keyterm prompting. The app's own name
+    is always included — it's the word speech engines miss most here."""
+    import re as _re
+    out, seen = [], set()
+    for t in ["NibCast"] + _re.split(r"[,\n;]+", vocab or ""):
+        t = t.strip().strip(".")
+        if t and len(t) <= 40 and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out[:limit]
+
+
 # ── Deepgram diarization formatter ──────────────────────────
 # Converts word-level speaker tags from Deepgram into a human-readable
 # "Speaker 1: ...\nSpeaker 2: ..." transcript. Each speaker's words are
@@ -382,6 +398,12 @@ class Transcriber:
             params["language"] = config.LANGUAGE
         if diarize:
             params["diarize"] = "true"
+        # Keyterm prompting (nova-3): bias recognition toward the speaker's own
+        # names and jargon — the same list Whisper gets as its prompt — so
+        # "NibCast" stops coming back as "new cast". Dropped once if rejected.
+        terms = _keyterms(getattr(config, "WHISPER_PROMPT", ""))
+        if terms and str(model).startswith("nova-3"):
+            params["keyterm"] = terms
 
         headers = {"Content-Type": "audio/wav"}
         if key:
@@ -411,6 +433,10 @@ class Transcriber:
                         text = ""
                     log.info(f"✅ [{name}] {redact(text)}")
                     return text
+                if resp.status_code == 400 and "keyterm" in params:
+                    log.warning(f"⚠️  [{name}] rejected keyterms — retrying without them")
+                    params.pop("keyterm", None)
+                    continue
                 if 400 <= resp.status_code < 500:
                     log.error(f"❌ [{name}] HTTP {resp.status_code}: {resp.text[:300]}")
                     return ""
